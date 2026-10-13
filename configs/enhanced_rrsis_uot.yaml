@@ -8,6 +8,17 @@ lora_alpha: 32.0         # LoRA scaling factor
 freeze_backbone: true    # Freeze ViT backbone
 freeze_text_encoder: true # Freeze text encoder
 
+# ====== SOCT-SAM (CVPR 2027 Proposed Full Model B6) ======
+use_soct: true                # Stochastic-Order Constrained Transport
+lambda_ord: 5.0               # Stochastic order penalty weight
+theta_anchor: 0.1             # Contextual anchor belief temperature
+lambda_occ: 1.0               # Occupancy supervision loss weight
+lambda_rho: 0.5               # Target area Huber loss weight
+lambda_tau: 0.1               # Bandwidth regularization loss weight
+use_scl: false                # Gram SCL (ablation C4 only; false for proposed B6)
+soct_outer_iter: 10           # Dual update iterations
+soct_inner_iter: 30           # Inner log-domain Sinkhorn iterations
+
 # ====== Enhancement Flags ======
 use_dynamic_lora: true        # Text-Guided Dynamic LoRA
 use_contrastive_loss: true    # InfoNCE Contrastive Loss
@@ -16,7 +27,7 @@ use_ohem_loss: true           # OHEM + FocalDice + Boundary Loss
 
 # ====== Enhancement Parameters ======
 contrastive_weight: 0.1       # Weight for contrastive loss
-scl_weight: 0.1               # Weight for structural consistency loss
+scl_weight: 0.1               # Weight for structural consistency loss (if use_scl: true)
 ohem_hard_ratio: 0.3          # Fraction of hardest pixels for OHEM
 ot_reg: 0.1                   # Sinkhorn entropy regularization
 ot_num_iter: 10               # Sinkhorn iterations

@@ -50,16 +50,18 @@ Image (B,3,504,504) + Caption (List[str])
 
 ---
 
-## ✨ Novel Core Enhancements (Over RRSIS_SAM3)
+## ✨ Core Methodology & Architecture (SOCT-SAM — CVPR 2027)
 
-| Enhancement | Module | Description |
-|-------------|--------|-------------|
-| 🟢 **Text-Guided Dynamic LoRA** | [dynamic_lora.py](file:///d:/FYPPP/Final_RRSIS/lib/dynamic_lora.py) | Text-conditioned vision adapter weights — vision encoder adapts per-caption |
-| 🟢 **Multi-Scale OT Alignment** | [multiscale_ot_alignment.py](file:///d:/FYPPP/Final_RRSIS/lib/multiscale_ot_alignment.py) | Scale-aware OT alignment across all FPN levels with gated residual fusion |
-| 🟢 **OHEM + Focal + Boundary Loss** | [ohem_loss.py](file:///d:/FYPPP/Final_RRSIS/lib/ohem_loss.py) | Hard pixel mining + focal weighting + boundary-aware supervision |
-| 🟢 **Contrastive Loss (InfoNCE)** | [contrastive_loss.py](file:///d:/FYPPP/Final_RRSIS/lib/contrastive_loss.py) | Auxiliary loss aligning masked visual features with text features |
-| 🟢 **Grounding-Aware Prompt Generator** | [prompt_generator.py](file:///d:/FYPPP/Final_RRSIS/lib/prompt_generator.py) | Extracts point-based geometric prompts from OT transport plans |
-| 🟢 **Scale-Aware Prompting (SAP)** | [prompt_generator.py](file:///d:/FYPPP/Final_RRSIS/lib/prompt_generator.py) | Dynamically adapts point counts based on object scale to suppress noise |
+| Component | Module | Description |
+|-----------|--------|-------------|
+| 🟢 **Stochastic-Order Constrained Transport (SOCT)** | [lib/soct_alignment.py](lib/soct_alignment.py) | Dual-conditioned Sinkhorn solver enforcing weak directional ordering |
+| 🟢 **Target Demand & Null Assignment** | [lib/soct_alignment.py](lib/soct_alignment.py) | Calibrated target area budget $\hat{\rho}$ + null column absorbing background mass |
+| 🟢 **Independent Contextual Anchor Priors** | [lib/soct_alignment.py](lib/soct_alignment.py) | Normalized Gibbs location belief $r_{mj}$ without consuming target area |
+| 🟢 **Adaptive Spatial Filtration** | [lib/soct_alignment.py](lib/soct_alignment.py) | Bounded image-language conditioned bandwidth $\tau_m$ along directional axes |
+| 🟢 **Target Occupancy Prompting** | [lib/prompt_generator.py](lib/prompt_generator.py) | Spatially separated peaks from target occupancy map $q^{(f)}$ |
+| 🟢 **SOCT Losses ($\mathcal{L}_{\text{occ}}, \mathcal{L}_\rho, \mathcal{L}_\tau$)** | [lib/soct_loss.py](lib/soct_loss.py) | Balanced BCE+Dice occupancy loss, Area Huber loss, and Bandwidth regularization |
+| 🟢 **Text-Guided Dynamic LoRA** | [lib/dynamic_lora.py](lib/dynamic_lora.py) | Text-conditioned vision adapter weights (retained supporting architecture) |
+| 🟢 **Contrastive Loss (InfoNCE)** | [lib/contrastive_loss.py](lib/contrastive_loss.py) | Cross-modal feature alignment supervision |
 
 
 ## 📂 Project Directory Structure

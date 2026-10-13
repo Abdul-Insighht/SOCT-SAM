@@ -5,5 +5,11 @@ __pycache__/
 .DS_Store
 *.log
 *.pth
+*.pt
 *.pkl
 output/
+checkpoints/
+wandb/
+.ipynb_checkpoints/
+.vscode/
+.idea/

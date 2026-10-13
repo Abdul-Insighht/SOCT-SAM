@@ -72,6 +72,10 @@ python train.py \
     --ot_reg 0.1 \
     --ot_num_iter 10 \
     --num_ot_scales 3 \
+    --use_soct \
+    --lambda_ord 5.0 \
+    --lambda_occ 1.0 \
+    --lambda_rho 0.5 \
     --focal_gamma 2.0
 
 echo "🎉 Training epoch run complete!"

@@ -25,7 +25,7 @@ from refer.refer import REFER
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from transforms import TargetAwareZoomCrop
+from transforms import TargetAwareZoomCrop, RandomHorizontalFlip
 
 
 # ============================================================
@@ -66,8 +66,9 @@ class RRSISDDataset(data.Dataset):
             transforms.ToTensor(),
         ])
         
-        # Zoom-In Crop
+        # Zoom-In Crop & Horizontal Flip
         self.zoom_crop = TargetAwareZoomCrop(zoom_prob=0.5, small_threshold=0.1) if split == 'train' else None
+        self.hflip = RandomHorizontalFlip(flip_prob=0.5) if split == 'train' else None
 
         # Random augmentation for training
         if split == 'train':
@@ -99,10 +100,22 @@ class RRSISDDataset(data.Dataset):
         annot = np.zeros(ref_mask.shape, dtype=np.uint8)
         annot[ref_mask == 1] = 1
 
-        # Target-aware zoom crop (for extremely small targets)
+        # Select caption
+        if self.eval_mode:
+            caption = self.captions[index]  # Return all captions for eval
+        else:
+            caption = random.choice(self.captions[index])
+
+        # Target-aware zoom crop (safely preserves anchors on directional queries)
         if self.zoom_crop is not None:
             mask_pil = Image.fromarray(annot)
-            img, mask_pil = self.zoom_crop(img, mask_pil)
+            img, mask_pil = self.zoom_crop(img, mask_pil, caption=caption)
+            annot = np.array(mask_pil)
+
+        # Random horizontal reflection with relation inversion (Paper CVPR 2027 Control 5)
+        if self.hflip is not None:
+            mask_pil = Image.fromarray(annot)
+            img, mask_pil, caption = self.hflip(img, mask_pil, caption=caption)
             annot = np.array(mask_pil)
 
         # Resize image and mask
@@ -110,12 +123,6 @@ class RRSISDDataset(data.Dataset):
         mask = torch.from_numpy(annot).unsqueeze(0).float()
         mask = TF.resize(mask, [self.image_size, self.image_size],
                          interpolation=TF.InterpolationMode.NEAREST)
-
-        # Select caption
-        if self.eval_mode:
-            caption = self.captions[index]  # Return all captions for eval
-        else:
-            caption = random.choice(self.captions[index])
 
         return img, mask, caption
 
@@ -170,8 +177,9 @@ class RRSISHRDataset(data.Dataset):
             transforms.ToTensor(),
         ])
         
-        # Zoom-In Crop
+        # Zoom-In Crop & Horizontal Flip
         self.zoom_crop = TargetAwareZoomCrop(zoom_prob=0.5, small_threshold=0.1) if split == 'train' else None
+        self.hflip = RandomHorizontalFlip(flip_prob=0.5) if split == 'train' else None
 
         print(f"[RRSIS-HR] Loaded {len(self.ref_ids)} samples for {split}")
 
@@ -191,11 +199,23 @@ class RRSISHRDataset(data.Dataset):
         ref_mask = np.array(self.refer.getMask(ref[0])['mask'])
         annot = np.zeros(ref_mask.shape, dtype=np.uint8)
         annot[ref_mask == 1] = 1
-        
-        # Target-aware zoom crop
+
+        # Select caption
+        if self.eval_mode:
+            caption = self.captions[index]
+        else:
+            caption = random.choice(self.captions[index])
+
+        # Target-aware zoom crop (safely preserves anchors on directional queries)
         if self.zoom_crop is not None:
             mask_pil = Image.fromarray(annot)
-            img, mask_pil = self.zoom_crop(img, mask_pil)
+            img, mask_pil = self.zoom_crop(img, mask_pil, caption=caption)
+            annot = np.array(mask_pil)
+
+        # Random horizontal reflection with relation inversion (Paper CVPR 2027 Control 5)
+        if self.hflip is not None:
+            mask_pil = Image.fromarray(annot)
+            img, mask_pil, caption = self.hflip(img, mask_pil, caption=caption)
             annot = np.array(mask_pil)
 
         # Resize
@@ -204,13 +224,114 @@ class RRSISHRDataset(data.Dataset):
         mask = TF.resize(mask, [self.image_size, self.image_size],
                          interpolation=TF.InterpolationMode.NEAREST)
 
+        return img, mask, caption
+
+
+# ============================================================
+# RISLAD Dataset (uses REFER API)
+# ============================================================
+class RISLADDataset(data.Dataset):
+    """
+    RISLAD dataset loader.
+    """
+
+    def __init__(self, args, split='train', eval_mode=False):
+        self.split = split
+        self.eval_mode = eval_mode
+        self.image_size = args.image_size
+
+        # Load REFER annotations
+        self.refer = REFER(args.data_root, 'rislad', args.splitBy)
+
+        ref_ids = self.refer.getRefIds(split=self.split)
+        img_ids = self.refer.getImgIds(ref_ids)
+        all_imgs = self.refer.Imgs
+        self.imgs = list(all_imgs[i] for i in img_ids)
+        self.ref_ids = ref_ids
+
+        # Build captions
+        self.captions = []
+        for r in ref_ids:
+            ref = self.refer.Refs[r]
+            caption_for_ref = [el['raw'] for el in ref['sentences']]
+            self.captions.append(caption_for_ref)
+
+        # Image transforms
+        self.img_transform = transforms.Compose([
+            transforms.Resize((self.image_size, self.image_size)),
+            transforms.ToTensor(),
+        ])
+        
+        # Zoom-In Crop & Horizontal Flip
+        self.zoom_crop = TargetAwareZoomCrop(zoom_prob=0.5, small_threshold=0.1) if split == 'train' else None
+        self.hflip = RandomHorizontalFlip(flip_prob=0.5) if split == 'train' else None
+
+        # Random augmentation for training
+        if split == 'train':
+            num_to_mask = int(len(ref_ids) * 0.2)
+            self.images_to_mask = set(random.sample(ref_ids, num_to_mask))
+        else:
+            self.images_to_mask = set()
+
+        print(f"[RISLAD] Loaded {len(self.ref_ids)} samples for {split}")
+
+    def __len__(self):
+        return len(self.ref_ids)
+
+    def __getitem__(self, index):
+        this_ref_id = self.ref_ids[index]
+        this_img_id = self.refer.getImgIds(this_ref_id)
+        this_img = self.refer.Imgs[this_img_id[0]]
+
+        # Load image
+        img = Image.open(os.path.join(self.refer.IMAGE_DIR, this_img['file_name'])).convert('RGB')
+
+        # Random occlusion augmentation
+        if self.split == 'train' and this_ref_id in self.images_to_mask:
+            img = self._add_random_boxes(img)
+
+        # Load mask
+        ref = self.refer.loadRefs(this_ref_id)
+        ref_mask = np.array(self.refer.getMask(ref[0])['mask'])
+        annot = np.zeros(ref_mask.shape, dtype=np.uint8)
+        annot[ref_mask == 1] = 1
+
         # Select caption
         if self.eval_mode:
-            caption = self.captions[index]
+            caption = self.captions[index]  # Return all captions for eval
         else:
             caption = random.choice(self.captions[index])
 
+        # Target-aware zoom crop (safely preserves anchors on directional queries)
+        if self.zoom_crop is not None:
+            mask_pil = Image.fromarray(annot)
+            img, mask_pil = self.zoom_crop(img, mask_pil, caption=caption)
+            annot = np.array(mask_pil)
+
+        # Random horizontal reflection with relation inversion (Paper CVPR 2027 Control 5)
+        if self.hflip is not None:
+            mask_pil = Image.fromarray(annot)
+            img, mask_pil, caption = self.hflip(img, mask_pil, caption=caption)
+            annot = np.array(mask_pil)
+
+        # Resize image and mask
+        img = self.img_transform(img)
+        mask = torch.from_numpy(annot).unsqueeze(0).float()
+        mask = TF.resize(mask, [self.image_size, self.image_size],
+                         interpolation=TF.InterpolationMode.NEAREST)
+
         return img, mask, caption
+
+    @staticmethod
+    def _add_random_boxes(img, min_num=20, max_num=60, box_size=32):
+        img_np = np.asarray(img).copy()
+        img_size = img_np.shape[1]
+        num = random.randint(min_num, max_num)
+        for _ in range(num):
+            y = random.randint(0, img_size - box_size)
+            x = random.randint(0, img_size - box_size)
+            img_np[y:y+box_size, x:x+box_size] = 0
+        return Image.fromarray(img_np, 'RGB')
 
 
 # ============================================================
@@ -244,8 +365,9 @@ class RefSegRSDataset(data.Dataset):
             transforms.ToTensor(),
         ])
         
-        # Zoom-In Crop
+        # Zoom-In Crop & Horizontal Flip
         self.zoom_crop = TargetAwareZoomCrop(zoom_prob=0.5, small_threshold=0.1) if split == 'train' else None
+        self.hflip = RandomHorizontalFlip(flip_prob=0.5) if split == 'train' else None
 
         print(f"[RefSegRS] Loaded {len(self.imgs)} samples for {split}")
 
@@ -286,11 +408,23 @@ class RefSegRSDataset(data.Dataset):
         ref_mask = np.array(label_mask) > 50
         annot = np.zeros(ref_mask.shape, dtype=np.uint8)
         annot[ref_mask == 1] = 1
-        
-        # Target-aware zoom crop
+
+        # Select caption
+        if self.eval_mode:
+            caption = self.captions[index]
+        else:
+            caption = self.captions[index][0]
+
+        # Target-aware zoom crop (safely preserves anchors on directional queries)
         if self.zoom_crop is not None:
             mask_pil = Image.fromarray(annot)
-            img, mask_pil = self.zoom_crop(img, mask_pil)
+            img, mask_pil = self.zoom_crop(img, mask_pil, caption=caption)
+            annot = np.array(mask_pil)
+
+        # Random horizontal reflection with relation inversion (Paper CVPR 2027 Control 5)
+        if self.hflip is not None:
+            mask_pil = Image.fromarray(annot)
+            img, mask_pil, caption = self.hflip(img, mask_pil, caption=caption)
             annot = np.array(mask_pil)
 
         # Resize
@@ -298,12 +432,6 @@ class RefSegRSDataset(data.Dataset):
         mask = torch.from_numpy(annot).unsqueeze(0).float()
         mask = TF.resize(mask, [self.image_size, self.image_size],
                          interpolation=TF.InterpolationMode.NEAREST)
-
-        # Select caption
-        if self.eval_mode:
-            caption = self.captions[index]
-        else:
-            caption = self.captions[index][0]
 
         return img, mask, caption
 
@@ -326,6 +454,7 @@ def get_dataset(args, split='train', eval_mode=False):
     dataset_map = {
         'rrsis_d': RRSISDDataset,
         'rrsis_hr': RRSISHRDataset,
+        'rislad': RISLADDataset,
         'refsegrs': RefSegRSDataset,
     }
 

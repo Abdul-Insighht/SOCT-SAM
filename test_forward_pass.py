@@ -17,15 +17,17 @@ def test_forward():
         use_contrastive_loss=True,
         use_multiscale_ot=True,
         use_ohem_loss=True,
+        use_soct=True,
+        lambda_ord=5.0,
+        theta_anchor=0.1,
     )
     model = model.float()
     
     B = 2
     # Mock inputs
     images = torch.randn(B, 3, 504, 504)
-    # The EnhancedRRSIS_UOT forward actually expects captions as strings, 
-    # but the VETextEncoder handles strings. Let's mock the captions.
-    captions = ["a small red car", "a very large agricultural field near the river"]
+    # Referring expressions with directional and non-directional relations
+    captions = ["the small white plane to the left of the hangar", "a large ship on water"]
     
     print("Running Forward Pass...")
     try:

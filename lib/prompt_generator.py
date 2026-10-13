@@ -1,95 +1,125 @@
+"""
+Grounding-Aware Prompt Generation from Target Occupancy for SOCT-SAM.
+Implementation of CVPR 2027 paper:
+"SOCT-SAM: Stochastic-Order Constrained Transport for Referring Remote Sensing Image Segmentation"
+
+Section 3.7:
+- Derive geometric prompts directly from finest-grid target occupancy q^(f) \in [0, 1].
+- Select spatially separated local maxima (peaks) of q^(f) as positive points (cap K = 5).
+- Do not use max_k P_{jk} or min-max normalization.
+- Retain only one point when predicted target area \hat{\rho} < 0.01 (tiny-target regime).
+- Map cell centres accurately to image prompt coordinates.
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Optional, Tuple
 
 
 class GroundingAwarePromptGenerator(nn.Module):
     """
-    Grounding-Aware Prompts Generation (GPG) module inspired by SGSRF.
-
-    This module takes the OT transport plan (which acts as a structural-semantic
-    alignment map) and generates explicit geometric prompts for the SAM3 Decoder.
-    
-    It extracts:
-    1. Sparse Prompts (Points): Coordinates of the highest probability regions.
-    2. Dense Prompts (Masks): Low-resolution coarse mask priors.
+    Generates sparse geometric point prompts for SAM3 from target occupancy maps.
     """
-    def __init__(self, num_points=1):
+    def __init__(self, max_points: int = 5, min_separation: int = 2):
         super().__init__()
-        self.num_points = num_points
-        print(f"[GPG] Initialized Grounding-Aware Prompt Generator (num_points={num_points})")
+        self.max_points = max_points
+        self.min_separation = min_separation
+        print(f"[SOCT-PromptGenerator] Initialized with max_points={max_points}, min_sep={min_separation}")
 
     @torch.no_grad()
-    def forward(self, P, text_mask, original_image_size, device):
+    def forward(
+        self,
+        occupancy: torch.Tensor,
+        original_image_size: int,
+        device: torch.device,
+        rho_hat: Optional[torch.Tensor] = None,
+        text_mask: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Generate geometric prompts from the OT transport plan.
-
         Args:
-            P: (B, HW, seq) transport plan from the deepest OT aligner.
-            text_mask: (B, seq) boolean mask (True = padding).
-            original_image_size: int, size of the input image (e.g., 504).
+            occupancy: (B, H_f, W_f) target occupancy map q^(f) in [0, 1],
+                       OR (B, HW, seq) raw transport plan (for backward compatibility).
+            original_image_size: int, spatial size of image (e.g. 504).
             device: torch.device.
+            rho_hat: Optional (B, 1) predicted target area from area head.
+            text_mask: Optional (B, seq) boolean mask for backward compat.
 
         Returns:
-            points: (B, num_points, 2) normalized coordinates [0, 1] or absolute?
-                    SAM3 expects absolute coordinates if scaled, but for the FindStage 
-                    we can provide absolute pixel coordinates.
-            points_mask: (B, num_points) boolean mask.
-            dense_mask: (B, 1, 256, 256) dense mask prior for SAM3.
+            points: (B, K_max, 2) coordinates in image space [x, y].
+            points_mask: (B, K_max) boolean mask (False = valid, True = ignore/padded).
+            point_labels: (B, K_max) long tensor (1 = foreground positive point, 0 = ignore).
         """
-        B, HW, seq = P.shape
-        H = W = int(HW ** 0.5)
-
-        # 1. Mask out padding tokens in the transport plan
-        if text_mask is not None:
-            # text_mask is True for padding. We want to keep valid tokens (False)
-            valid_mask = (~text_mask).unsqueeze(1)  # (B, 1, seq)
-            P_valid = P * valid_mask.float()
+        # Handle input shape
+        if occupancy.dim() == 3 and occupancy.shape[1] != occupancy.shape[2]:
+            # Raw P of shape (B, HW, seq) -> backward compatibility fallback
+            B, HW, seq = occupancy.shape
+            H = W = int(HW ** 0.5)
+            if text_mask is not None:
+                valid = (~text_mask).unsqueeze(1).float()
+                q_map = (occupancy * valid).sum(dim=-1).view(B, H, W)
+            else:
+                q_map = occupancy.sum(dim=-1).view(B, H, W)
+        elif occupancy.dim() == 3:
+            # Proper occupancy map (B, H_f, W_f)
+            B, H, W = occupancy.shape
+            q_map = occupancy
         else:
-            P_valid = P
+            raise ValueError(f"Unexpected occupancy shape: {occupancy.shape}")
 
-        # 2. Aggregate over sequence to get a global spatial heatmap
-        heatmap = P_valid.sum(dim=-1)  # (B, HW)
-        heatmap = heatmap.view(B, H, W)
+        K_max = self.max_points
+        points = torch.zeros((B, K_max, 2), device=device, dtype=torch.float32)
+        points_mask = torch.zeros((B, K_max), device=device, dtype=torch.bool)
+        point_labels = torch.ones((B, K_max), device=device, dtype=torch.long)
 
-        # 3. Scale-Aware Prompting (SAP) from ReSaP & Sparse Prompts Generation
-        flat_heatmap = heatmap.view(B, -1)
-        
-        # Measure target area ratio for scale awareness
-        b_max = flat_heatmap.max(dim=1, keepdim=True)[0] + 1e-6
-        norm_heatmap = flat_heatmap / b_max
-        active_area = (norm_heatmap > 0.5).sum(dim=1).float() / (H * W)
-        
-        # Extract max 5 points for structure coverage
-        K_max = 5
-        _, topk_idx = torch.topk(flat_heatmap, K_max, dim=-1)
+        # Scale factors to convert feature cell indices to image pixels
+        scale_y = float(original_image_size) / float(H)
+        scale_x = float(original_image_size) / float(W)
 
-        # Convert 1D indices to 2D (y, x) coordinates in the feature map space
-        y_feat = torch.div(topk_idx, W, rounding_mode='floor')
-        x_feat = topk_idx % W
+        # Spatially separated peak extraction via 3x3 local maximum suppression
+        # local_max: (B, 1, H, W)
+        kernel_size = 2 * self.min_separation + 1
+        padding = self.min_separation
+        q_4d = q_map.unsqueeze(1) # (B, 1, H, W)
+        local_max = F.max_pool2d(q_4d, kernel_size=kernel_size, stride=1, padding=padding)
+        is_peak = (q_4d == local_max) & (q_4d > 0.05) # Peak threshold
 
-        # Scale coordinates to the original image size
-        scale_y = original_image_size / H
-        scale_x = original_image_size / W
-
-        y_img = (y_feat.float() + 0.5) * scale_y
-        x_img = (x_feat.float() + 0.5) * scale_x
-
-        # SAM3 expects points as (x, y)
-        points = torch.stack((x_img, y_img), dim=-1)  # (B, K_max, 2)
-        
-        # Initialize masks and labels (False = valid point, True = padded/ignore)
-        points_mask = torch.zeros((B, K_max), dtype=torch.bool, device=device)
-        point_labels = torch.ones((B, K_max), dtype=torch.long, device=device)
-        
-        # Apply dynamic scale-adaptive logic per image in the batch
         for b in range(B):
-            if active_area[b] < 0.01:
-                # Tiny object: Keep only 1 center point to avoid background noise
-                # So we pad (ignore) the rest of the points (set to True)
-                points_mask[b, 1:] = True
-                point_labels[b, 1:] = 0
+            sample_q = q_map[b] # (H, W)
+            sample_peaks = is_peak[b, 0] # (H, W) bool
 
-        # We intentionally omit the dense_mask because SAM3's Image Predictor GeometryEncoder 
-        # is not pre-trained with a MaskEncoder. Passing it would introduce untrained parameters.
+            # Coordinates of peaks sorted by occupancy descending
+            peak_coords = torch.nonzero(sample_peaks, as_tuple=False) # (N_peaks, 2) with (y, x)
+            if peak_coords.shape[0] > 0:
+                peak_vals = sample_q[peak_coords[:, 0], peak_coords[:, 1]]
+                sorted_indices = torch.argsort(peak_vals, descending=True)
+                sorted_coords = peak_coords[sorted_indices]
+            else:
+                # Fallback: argmax of map if no peaks exceed threshold
+                flat_idx = torch.argmax(sample_q.flatten())
+                y_single = torch.div(flat_idx, W, rounding_mode='floor')
+                x_single = flat_idx % W
+                sorted_coords = torch.tensor([[y_single, x_single]], device=device)
+
+            # Determine how many points to keep based on predicted area \hat{\rho}
+            if rho_hat is not None:
+                area_ratio = rho_hat[b, 0].item()
+            else:
+                area_ratio = (sample_q > 0.5).sum().float().item() / (H * W)
+
+            # If tiny target (\hat{\rho} < 0.01), retain only 1 point
+            n_keep = 1 if area_ratio < 0.01 else min(K_max, sorted_coords.shape[0])
+
+            for k in range(n_keep):
+                y_c = sorted_coords[k, 0].float()
+                x_c = sorted_coords[k, 1].float()
+                # Center of cell mapped to image coordinates (x, y)
+                points[b, k, 0] = (x_c + 0.5) * scale_x
+                points[b, k, 1] = (y_c + 0.5) * scale_y
+
+            # Pad remaining points
+            if n_keep < K_max:
+                points_mask[b, n_keep:] = True
+                point_labels[b, n_keep:] = 0
+
         return points, points_mask, point_labels

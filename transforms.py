@@ -1,6 +1,7 @@
 import numpy as np
 from PIL import Image
 import random
+import re
 
 import torch
 from torchvision import transforms as T
@@ -56,14 +57,39 @@ class RandomResize(object):
         return image, target
 
 
+def invert_directional_text(text: str) -> str:
+    """
+    Inverts left/right directional relations when image is horizontally flipped.
+    Paper CVPR 2027 Section 6 Control 5:
+    'Horizontal reflection plus left/right inversion preserves the transformed target label.'
+    """
+    # Use placeholder to avoid colliding swaps (e.g. left -> right -> left)
+    res = text
+    res = re.sub(r'\bleft\b', '__TEMP_LEFT__', res, flags=re.IGNORECASE)
+    res = re.sub(r'\bright\b', 'left', res, flags=re.IGNORECASE)
+    res = re.sub(r'__TEMP_LEFT__', 'right', res)
+
+    res = re.sub(r'\bwest\b', '__TEMP_WEST__', res, flags=re.IGNORECASE)
+    res = re.sub(r'\beast\b', 'west', res, flags=re.IGNORECASE)
+    res = re.sub(r'__TEMP_WEST__', 'east', res)
+    return res
+
+
 class RandomHorizontalFlip(object):
-    def __init__(self, flip_prob):
+    def __init__(self, flip_prob=0.5):
         self.flip_prob = flip_prob
 
-    def __call__(self, image, target):
+    def __call__(self, image, target, caption=None):
         if random.random() < self.flip_prob:
             image = F.hflip(image)
             target = F.hflip(target)
+            if caption is not None:
+                if isinstance(caption, str):
+                    caption = invert_directional_text(caption)
+                elif isinstance(caption, list):
+                    caption = [invert_directional_text(c) for c in caption]
+        if caption is not None:
+            return image, target, caption
         return image, target
 
 
@@ -78,7 +104,16 @@ class TargetAwareZoomCrop(object):
         self.zoom_prob = zoom_prob
         self.small_threshold = small_threshold
 
-    def __call__(self, image, target):
+    def __call__(self, image, target, caption=None):
+        if caption is not None:
+            # Paper CVPR 2027 Section 6 Control 6:
+            # "Avoid relation-changing target-aware crops: disable such crops on the directional subset"
+            from lib.language_parser import GLOBAL_PARSER
+            c_text = caption if isinstance(caption, str) else caption[0]
+            p_info = GLOBAL_PARSER.parse(c_text)
+            if not p_info.get('is_fallback', True) and len(p_info.get('relations', [])) > 0:
+                return image, target
+
         if random.random() > self.zoom_prob:
             return image, target
             

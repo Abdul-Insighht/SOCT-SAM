@@ -1,39 +1,46 @@
-# ROTSAM: Adapting SAM3 for Referring Remote Sensing Image Segmentation via Text-Guided Optimal Transport
+# SOCT-SAM: Stochastic-Order Constrained Transport for Referring Remote Sensing Image Segmentation (CVPR 2027)
 ---
 
-## What's New (Over RRSIS_SAM3)
+## What's New: From ROTSAM Baseline (B0) to SOCT-SAM Proposed Full Model (B6)
 
-| Enhancement | Module | Description |
-|-------------|--------|-------------|
-| 🟢 **Text-Guided Dynamic LoRA** | [dynamic_lora.py](file:///d:/FYPPP/ahmadnoidea/lib/dynamic_lora.py) | Text-conditioned vision adapter weights — vision encoder adapts per-caption |
-| 🟢 **Multi-Scale OT Alignment** | [multiscale_ot_alignment.py](file:///d:/FYPPP/ahmadnoidea/lib/multiscale_ot_alignment.py) | Scale-aware OT alignment across all FPN levels with gated residual fusion |
-| 🟢 **OHEM + Focal + Boundary Loss** | [ohem_loss.py](file:///d:/FYPPP/ahmadnoidea/lib/ohem_loss.py) | Hard pixel mining + focal weighting + boundary-aware supervision |
-| 🟢 **Contrastive Loss (InfoNCE)** | [contrastive_loss.py](file:///d:/FYPPP/ahmadnoidea/lib/contrastive_loss.py) | Auxiliary loss aligning masked visual features with text features |
-| 🟢 **Grounding-Aware Prompt Generator** | [prompt_generator.py](file:///d:/FYPPP/ahmadnoidea/lib/prompt_generator.py) | Extracts point-based geometric prompts from OT transport plans |
-| 🟢 **Scale-Aware Prompting (SAP)** | [prompt_generator.py](file:///d:/FYPPP/ahmadnoidea/lib/prompt_generator.py) | Dynamically adapts point counts based on object scale to suppress noise |
+| Enhancement | Module | Description | Paper Section |
+|-------------|--------|-------------|---------------|
+| 🟢 **Stochastic-Order Constrained Transport (SOCT)** | [soct_alignment.py](file:///d:/Final_RRSIS-main/Final_RRSIS-main/lib/soct_alignment.py) | Dual-conditioned Sinkhorn solver enforcing weak directional ordering along expression axes | Sec 3.5 & 3.6 |
+| 🟢 **Selective Target Demand & Null Token** | [soct_alignment.py](file:///d:/Final_RRSIS-main/Final_RRSIS-main/lib/soct_alignment.py) | Predicted target area $\hat{\rho}$ budget + null column ($1 - \hat{\rho}$) absorbing background mass | Sec 3.3 (Eq. 4-5) |
+| 🟢 **Independent Contextual Anchor Priors** | [soct_alignment.py](file:///d:/Final_RRSIS-main/Final_RRSIS-main/lib/soct_alignment.py) | Gibbs location belief $r_{mj}$ computed independently from lifted costs without consuming area mass | Sec 3.3 (Eq. 6) |
+| 🟢 **Adaptive Spatial Filtration** | [soct_alignment.py](file:///d:/Final_RRSIS-main/Final_RRSIS-main/lib/soct_alignment.py) | Bounded image-language conditioned bandwidth $\tau_m$ comparing distributions along directional axes | Sec 3.4 (Eq. 7-10) |
+| 🟢 **Multi-Scale Cost Lifting ($D_s$)** | [soct_alignment.py](file:///d:/Final_RRSIS-main/Final_RRSIS-main/lib/soct_alignment.py) | Aggregation operators $D_s$ lifting coarse costs to finest grid for unified transport solve | Sec 3.2 (Eq. 3) |
+| 🟢 **Target Occupancy Prompting** | [prompt_generator.py](file:///d:/Final_RRSIS-main/Final_RRSIS-main/lib/prompt_generator.py) | Spatially separated peaks from target occupancy $q^{(f)}$ without min-max scaling | Sec 3.7 |
+| 🟢 **SOCT Losses ($\mathcal{L}_{\text{occ}}, \mathcal{L}_\rho, \mathcal{L}_\tau$)** | [soct_loss.py](file:///d:/Final_RRSIS-main/Final_RRSIS-main/lib/soct_loss.py) | Balanced BCE+Dice occupancy loss, Area Huber loss, and Bandwidth regularizer (Gram SCL removed) | Sec 3.8 (Eq. 22-26) |
+| 🟢 **Language Role Parser** | [language_parser.py](file:///d:/Final_RRSIS-main/Final_RRSIS-main/lib/language_parser.py) | Splits expressions into Target $\mathcal{T}$, Contextual Anchors $\mathcal{A}_m$, and Directions $d_m$ | Sec 3.2 |
+| 🟢 **Text-Guided Dynamic LoRA** | [dynamic_lora.py](file:///d:/Final_RRSIS-main/Final_RRSIS-main/lib/dynamic_lora.py) | Text-conditioned vision adapter weights (retained supporting architecture) | Sec 3.1 (Eq. 1) |
 
 ---
 
-## Architecture
-
-![Enhanced RRSIS-OT Architecture](ROTSAM_Architecture.jpg)
-
-### Data Flow Summary
+## Architecture & Data Flow
 
 ```
-Image (B,3,504,504) + Caption (List[str])
+Image (B, 3, 504, 504) + Referring Expression (List[str])
   ├─ Step 0:   Normalize → [-1, 1]
-  ├─ Step 1:   Text Encoder → language_features (seq, B, 256)
-  ├─ Step 1.5: Dynamic LoRA → cache pooled text (B, 256) in all LoRA layers
-  ├─ Step 1.8: ViT + LoRA → backbone_fpn: List[(B, 256, H_i, W_i)]
-  ├─ Step 2:   Multi-Scale OT → aligned FPN + transport plan P (B, HW, seq)
-  ├─ Step 3:   GPG + SAP → sparse points (B, K, 2)
-  ├─ Step 4:   Encode Prompt → prompt tokens
-  ├─ Step 5:   Transformer Encoder → fused hidden states
+  ├─ Step 1:   Language Parser → Target T, Contextual Anchors A_m, Directions d_m (left/right/above/below)
+  ├─ Step 1.2: Text Encoder → Token features T (seq, B, 256) & Sentence embedding z (B, 256)
+  ├─ Step 1.5: Dynamic LoRA → Expression-conditioned vision adapters
+  ├─ Step 1.8: Frozen ViT + LoRA → Multi-scale FPN features {X^(s)}
+  ├─ Step 2:   SOCT Feature Alignment:
+  │              - Predict Target Area \hat{\rho} and Null column b_\emptyset = 1 - \hat{\rho}
+  │              - Compute independent anchor priors r_{mj}
+  │              - Lift multi-scale costs to finest grid via D_s
+  │              - Run Dual-Conditioned Sinkhorn with adaptive spatial filtration \tau_m
+  │              - Target occupancy q^(s) & target-only gated fusion
+  ├─ Step 3:   Grounding-Aware Prompt Generator:
+  │              - Extract spatially separated peaks from q^(f)
+  │              - Scale-aware point cap (1 point if \hat{\rho} < 0.01)
+  ├─ Step 4:   Encode Prompt → Geometric prompt tokens
+  ├─ Step 5:   Transformer Encoder → Multi-modal fusion
   ├─ Step 6:   DETR Decoder → N=3 mask hypotheses
-  ├─ Step 7:   Segmentation Head → pred_masks (B, N, H, W)
-  ├─ Step 8:   Best Mask Selection → (B, 1, 504, 504)  [IoU-based ranking]
-  └─ Step 10:  Loss = SegLoss + 0.1 × Contrastive + 0.1 × SCL
+  ├─ Step 7:   Segmentation Head → Mask logits
+  ├─ Step 8:   Best Mask Selection → Final predicted mask \hat{Y}
+  └─ Step 10:  Loss = L_seg + \lambda_con L_con + \lambda_occ L_occ + \lambda_\rho L_\rho + \lambda_\tau L_\tau
 ```
 
 ---

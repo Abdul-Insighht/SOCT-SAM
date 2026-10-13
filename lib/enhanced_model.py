@@ -50,6 +50,9 @@ from .ohem_loss import EnhancedOHEMLoss
 from .ot_feature_alignment import OTFeatureAligner
 from .ot_loss import OTSegmentationLoss
 from .prompt_generator import GroundingAwarePromptGenerator
+from .soct_alignment import SOCTAligner
+from .soct_loss import SOCTSupervisionLoss
+from .language_parser import GLOBAL_PARSER
 
 
 class Enhanced_RRSIS_UOT(nn.Module):
@@ -98,6 +101,16 @@ class Enhanced_RRSIS_UOT(nn.Module):
         use_contrastive_loss: bool = True,
         use_multiscale_ot: bool = True,
         use_ohem_loss: bool = True,
+        # === SOCT-SAM (CVPR 2027 Proposed Full Model B6) ===
+        use_soct: bool = True,
+        lambda_ord: float = 5.0,
+        theta_anchor: float = 0.1,
+        lambda_occ: float = 1.0,
+        lambda_rho: float = 0.5,
+        lambda_tau: float = 0.1,
+        use_scl: bool = False,
+        soct_outer_iter: int = 10,
+        soct_inner_iter: int = 30,
         # === Enhancement params ===
         contrastive_weight: float = 0.1,
         scl_weight: float = 0.1,
@@ -114,6 +127,13 @@ class Enhanced_RRSIS_UOT(nn.Module):
         self.use_contrastive_loss = use_contrastive_loss
         self.use_multiscale_ot = use_multiscale_ot
         self.use_ohem_loss = use_ohem_loss
+        self.use_soct = use_soct
+        self.lambda_ord = lambda_ord
+        self.theta_anchor = theta_anchor
+        self.lambda_occ = lambda_occ
+        self.lambda_rho = lambda_rho
+        self.lambda_tau = lambda_tau
+        self.use_scl = use_scl
         self.contrastive_weight = contrastive_weight
         self.scl_weight = scl_weight
         self.boundary_loss_weight = boundary_loss_weight
@@ -157,9 +177,25 @@ class Enhanced_RRSIS_UOT(nn.Module):
         if gradient_checkpointing:
             print("[Enhanced_RRSIS_UOT] Gradient checkpointing enabled")
 
-        # ====== Multi-Scale OT Alignment ======
-        if use_multiscale_ot:
-            print(f"[Enhanced_RRSIS_UOT] Multi-Scale OT Alignment ({num_ot_scales} scales)")
+        # ====== Alignment Module ======
+        if use_soct:
+            print(f"[Enhanced_RRSIS_UOT] SOCT-SAM Alignment enabled (lambda_ord={lambda_ord}, theta={theta_anchor})")
+            self.soct_aligner = SOCTAligner(
+                d_model=d_model,
+                num_scales=num_ot_scales,
+                lambda_ord=lambda_ord,
+                theta_anchor=theta_anchor,
+                ot_eps=ot_reg,
+                num_outer=soct_outer_iter,
+                num_inner=soct_inner_iter,
+            )
+            self.soct_loss = SOCTSupervisionLoss(
+                lambda_occ=lambda_occ,
+                lambda_rho=lambda_rho,
+                lambda_tau=lambda_tau,
+            )
+        elif use_multiscale_ot:
+            print(f"[Enhanced_RRSIS_UOT] Multi-Scale OT Alignment ({num_ot_scales} scales) [Baseline B0]")
             self.ms_ot_aligner = MultiScaleOTAligner(
                 d_model=d_model,
                 num_scales=num_ot_scales,
@@ -197,7 +233,7 @@ class Enhanced_RRSIS_UOT(nn.Module):
 
         # ====== Grounding-Aware Prompt Generator ======
         print("[Enhanced_RRSIS_UOT] Grounding-Aware Prompt Generation (GPG) enabled")
-        self.gpg = GroundingAwarePromptGenerator(num_points=1)
+        self.gpg = GroundingAwarePromptGenerator(max_points=5, min_separation=2)
 
         # ====== Print Summary ======
         get_trainable_params_summary(self)
@@ -294,17 +330,45 @@ class Enhanced_RRSIS_UOT(nn.Module):
         backbone_out = self.sam3.backbone.forward_image(images)
         backbone_out.update(text_out)
 
-        # ====== Step 2: OT Feature Alignment ======
+        # ====== Step 2: Alignment (SOCT or Multi-Scale OT) ======
         text_feats = backbone_out.get('language_features', None)
         text_mask = backbone_out.get('language_mask', None)
+
+        q_finest = None
+        rho_hat = None
+        tau_val = None
+        P_map = None
 
         if text_feats is not None and 'backbone_fpn' in backbone_out:
             fpn_feats = backbone_out['backbone_fpn']
 
-            if self.use_multiscale_ot and hasattr(self, 'ms_ot_aligner'):
-                # Multi-Scale OT alignment (NEW)
+            if self.use_soct and hasattr(self, 'soct_aligner'):
+                # SOCT-SAM: Parse language roles and run Stochastic-Order Constrained Transport
+                parsed_batch = []
+                for cap in captions:
+                    p_info = GLOBAL_PARSER.parse(cap)
+                    words = cap.lower().split()
+                    t_idx, a_rels = GLOBAL_PARSER.align_tokens_to_roles(words, p_info)
+                    parsed_batch.append({
+                        'target_indices': t_idx,
+                        'relations': a_rels,
+                        'info': p_info
+                    })
+
+                aligned_fpn, q_finest, rho_hat, tau_val = self.soct_aligner(
+                    fpn_features=fpn_feats,
+                    text_feats=text_feats,
+                    text_mask=text_mask,
+                    parsed_batch=parsed_batch,
+                )
+                backbone_out['backbone_fpn'] = aligned_fpn
+
+            elif self.use_multiscale_ot and hasattr(self, 'ms_ot_aligner'):
+                # Multi-Scale OT alignment (Baseline B0)
                 aligned_fpn = self.ms_ot_aligner(fpn_feats, text_feats, text_mask)
                 backbone_out['backbone_fpn'] = aligned_fpn
+                last_aligner = self.ms_ot_aligner.scale_aligners[-1]
+                P_map = getattr(last_aligner, 'last_P', None)
             elif hasattr(self, 'ot_aligner'):
                 # Single-scale OT alignment (baseline fallback)
                 for i in range(len(fpn_feats)):
@@ -319,26 +383,35 @@ class Enhanced_RRSIS_UOT(nn.Module):
                             feat.tensors = aligned
                         else:
                             fpn_feats[i] = aligned
+                P_map = getattr(self.ot_aligner, 'last_P', None)
 
         # ====== Step 3: Prompt Generation via GPG Module ======
         img_ids = torch.arange(B, device=device)
         text_ids = torch.arange(B, device=device)
-        
-        # Get the transport plan from the last OT aligner
-        P_map = None
-        if self.use_multiscale_ot and hasattr(self, 'ms_ot_aligner'):
-            last_aligner = self.ms_ot_aligner.scale_aligners[-1]
-            P_map = getattr(last_aligner, 'last_P', None)
-        elif hasattr(self, 'ot_aligner'):
-            P_map = getattr(self.ot_aligner, 'last_P', None)
-            
+
         input_points = torch.zeros(B, 0, 2, device=device)
         input_points_mask = torch.zeros(B, 0, device=device, dtype=torch.bool)
         input_point_labels = torch.zeros(B, 0, device=device, dtype=torch.long)
-        
-        if P_map is not None:
-            # Generate explicit geometric prompts from structural alignment with Scale-Aware Prompting
-            input_points, input_points_mask, input_point_labels = self.gpg(P_map, text_mask, self.image_size, device)
+        has_prompts = False
+
+        if self.use_soct and q_finest is not None:
+            # Generate explicit geometric prompts from finest-grid target occupancy q^(f)
+            input_points, input_points_mask, input_point_labels = self.gpg(
+                occupancy=q_finest,
+                original_image_size=self.image_size,
+                device=device,
+                rho_hat=rho_hat,
+            )
+            has_prompts = True
+        elif P_map is not None:
+            # Baseline fallback from transport plan
+            input_points, input_points_mask, input_point_labels = self.gpg(
+                occupancy=P_map,
+                original_image_size=self.image_size,
+                device=device,
+                text_mask=text_mask,
+            )
+            has_prompts = True
 
         find_input = FindStage(
             img_ids=img_ids,
@@ -350,12 +423,12 @@ class Enhanced_RRSIS_UOT(nn.Module):
             input_points_mask=input_points_mask,
         )
 
-        if P_map is not None:
+        if has_prompts:
             # point_embeddings: [N_points, B, 2] - Must be normalized to [0, 1] for SAM3 pos encoder
             point_embeddings = (input_points / self.image_size).transpose(0, 1)
             # point_labels: [N_points, B]
             point_labels = input_point_labels.transpose(0, 1)
-            
+
             geometric_prompt = Prompt(
                 box_embeddings=torch.zeros(0, B, 4, device=device),
                 box_mask=torch.zeros(B, 0, device=device, dtype=torch.bool),
@@ -428,9 +501,26 @@ class Enhanced_RRSIS_UOT(nn.Module):
             else:
                 seg_loss = self._compute_fallback_loss(result['pred_masks'], masks_gt)
 
-            # SCL Loss (Structural Consistency Loss)
+            # SOCT Auxiliary Losses (Occupancy Loss, Area Loss, Bandwidth Loss)
+            soct_aux_loss = torch.tensor(0.0, device=device)
+            if self.use_soct and hasattr(self, 'soct_loss') and q_finest is not None and rho_hat is not None:
+                H_f, W_f = q_finest.shape[-2:]
+                tau_0 = 1.0 / max(H_f, W_f)
+                soct_aux_loss, l_occ, l_rho, l_tau = self.soct_loss(
+                    q_finest=q_finest,
+                    rho_hat=rho_hat,
+                    gt_masks=masks_gt,
+                    tau_val=tau_val,
+                    tau_0=tau_0,
+                )
+                result['occ_loss'] = l_occ.detach()
+                result['area_loss'] = l_rho.detach()
+                result['tau_loss'] = l_tau.detach()
+                result['pred_rho'] = rho_hat.detach().mean()
+
+            # SCL Loss (Structural Consistency Loss - Ablation C4 only)
             scl_loss = torch.tensor(0.0, device=device)
-            if self.use_multiscale_ot and hasattr(self, 'ms_ot_aligner'):
+            if self.use_scl and hasattr(self, 'ms_ot_aligner'):
                 scl_vals = [a.scl_loss for a in self.ms_ot_aligner.scale_aligners if isinstance(getattr(a, 'scl_loss', 0.0), torch.Tensor)]
                 if scl_vals:
                     scl_loss = sum(scl_vals) / len(scl_vals)
@@ -457,10 +547,15 @@ class Enhanced_RRSIS_UOT(nn.Module):
                         print(f"[WARNING] Contrastive loss skipped: {e}")
                     contrastive = torch.tensor(0.0, device=device)
 
-            result['loss'] = seg_loss + self.contrastive_weight * contrastive + self.scl_weight * scl_loss
+            total_loss = seg_loss + self.contrastive_weight * contrastive + soct_aux_loss
+            if self.use_scl:
+                total_loss = total_loss + self.scl_weight * scl_loss
+
+            result['loss'] = total_loss
             result['seg_loss'] = seg_loss.detach()
-            result['scl_loss'] = scl_loss.detach() if isinstance(scl_loss, torch.Tensor) else scl_loss
             result['contrastive_loss'] = contrastive.detach() if isinstance(contrastive, torch.Tensor) else contrastive
+            if self.use_scl:
+                result['scl_loss'] = scl_loss.detach() if isinstance(scl_loss, torch.Tensor) else scl_loss
 
         return result
 

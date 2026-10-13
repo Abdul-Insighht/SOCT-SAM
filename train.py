@@ -94,7 +94,7 @@ def get_optimizer(model, args):
             continue
         if 'lora' in name.lower() or 'dynamic_lora' in name.lower() or 'hyper_' in name.lower():
             lora_params.append(param)
-        elif any(x in name for x in ['ms_ot_aligner', 'contrastive_loss', 'enhanced_loss', 'ot_aligner']):
+        elif any(x in name for x in ['soct_aligner', 'soct_loss', 'ms_ot_aligner', 'contrastive_loss', 'enhanced_loss', 'ot_aligner']):
             enhancement_params.append(param)
         elif any(x in name for x in ['transformer', 'segmentation_head', 'geometry_encoder', 'dot_prod']):
             decoder_params.append(param)
@@ -238,6 +238,12 @@ def train_one_epoch(model, train_loader, optimizer, scheduler, scaler, device, e
             log_dict['seg_loss'] = outputs['seg_loss'].item() if isinstance(outputs['seg_loss'], torch.Tensor) else outputs['seg_loss']
         if 'contrastive_loss' in outputs:
             log_dict['cl_loss'] = outputs['contrastive_loss'].item() if isinstance(outputs['contrastive_loss'], torch.Tensor) else outputs['contrastive_loss']
+        if 'occ_loss' in outputs:
+            log_dict['occ_loss'] = outputs['occ_loss'].item() if isinstance(outputs['occ_loss'], torch.Tensor) else outputs['occ_loss']
+        if 'area_loss' in outputs:
+            log_dict['area_loss'] = outputs['area_loss'].item() if isinstance(outputs['area_loss'], torch.Tensor) else outputs['area_loss']
+        if 'pred_rho' in outputs:
+            log_dict['pred_rho'] = outputs['pred_rho'].item() if isinstance(outputs['pred_rho'], torch.Tensor) else outputs['pred_rho']
 
         metric_logger.update(**log_dict)
 
@@ -268,14 +274,16 @@ def main():
     print(f"  Batch Size: {args.batch_size} × {args.grad_accum_steps} accum")
     print(f"  Device: {device}")
     print(f"  --- Enhancements ---")
+    print(f"  SOCT-SAM: {getattr(args, 'use_soct', True) and not getattr(args, 'no_soct', False)} (lambda_ord={getattr(args, 'lambda_ord', 5.0)}, theta={getattr(args, 'theta_anchor', 0.1)})")
     print(f"  Dynamic LoRA: {args.use_dynamic_lora}")
-    print(f"  Contrastive Loss: {args.use_contrastive_loss} (weight={args.contrastive_weight}, SCL weight={args.scl_weight})")
+    print(f"  Contrastive Loss: {args.use_contrastive_loss} (weight={args.contrastive_weight})")
+    print(f"  Gram SCL Loss: {getattr(args, 'use_scl', False)} (weight={args.scl_weight})")
     print(f"  Multi-Scale OT: {args.use_multiscale_ot} ({args.num_ot_scales} scales)")
     print(f"  OHEM Loss: {args.use_ohem_loss} (hard_ratio={args.ohem_hard_ratio}, boundary_weight={args.boundary_loss_weight}, focal_gamma={args.focal_gamma})")
     print(f"{'='*60}\n")
 
     # ====== Build Enhanced Model ======
-    print("Building Enhanced_RRSIS_UOT model...")
+    print("Building Enhanced_RRSIS_UOT model (SOCT-SAM)...")
     model = Enhanced_RRSIS_UOT(
         sam3_ckpt=args.sam3_ckpt,
         image_size=args.image_size,
@@ -289,6 +297,16 @@ def main():
         use_contrastive_loss=args.use_contrastive_loss,
         use_multiscale_ot=args.use_multiscale_ot,
         use_ohem_loss=args.use_ohem_loss,
+        # SOCT-SAM (CVPR 2027 Proposed Full Model B6)
+        use_soct=getattr(args, 'use_soct', True) and not getattr(args, 'no_soct', False),
+        lambda_ord=getattr(args, 'lambda_ord', 5.0),
+        theta_anchor=getattr(args, 'theta_anchor', 0.1),
+        lambda_occ=getattr(args, 'lambda_occ', 1.0),
+        lambda_rho=getattr(args, 'lambda_rho', 0.5),
+        lambda_tau=getattr(args, 'lambda_tau', 0.1),
+        use_scl=getattr(args, 'use_scl', False),
+        soct_outer_iter=getattr(args, 'soct_outer_iter', 10),
+        soct_inner_iter=getattr(args, 'soct_inner_iter', 30),
         # Enhancement params
         contrastive_weight=args.contrastive_weight,
         scl_weight=args.scl_weight,

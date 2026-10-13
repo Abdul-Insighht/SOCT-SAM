@@ -16,7 +16,7 @@ def get_parser():
 
     # ====== Dataset ======
     parser.add_argument('--dataset', type=str, default='refcoco',
-                        choices=['refsegrs', 'rrsis_d', 'rrsis_hr'],
+                        choices=['refsegrs', 'rrsis_d', 'rrsis_hr', 'rislad'],
                         help='Dataset name')
     parser.add_argument('--split', type=str, default='train',
                         help='Data split (train/val/test)')
@@ -54,6 +54,28 @@ def get_parser():
                         help='Enable OHEM + Focal + Boundary loss')
     parser.add_argument('--no_ohem_loss', action='store_true', default=False,
                         help='Disable OHEM loss (use standard Dice+BCE)')
+
+    # ====== SOCT-SAM Flags (CVPR 2027 Proposed Model B6) ======
+    parser.add_argument('--use_soct', action='store_true', default=True,
+                        help='Enable Stochastic-Order Constrained Transport (SOCT)')
+    parser.add_argument('--no_soct', action='store_true', default=False,
+                        help='Disable SOCT (fallback to baseline ROTSAM B0)')
+    parser.add_argument('--lambda_ord', type=float, default=5.0,
+                        help='SOCT: Stochastic order penalty multiplier')
+    parser.add_argument('--theta_anchor', type=float, default=0.1,
+                        help='SOCT: Contextual anchor belief temperature')
+    parser.add_argument('--lambda_occ', type=float, default=1.0,
+                        help='SOCT: Weight for target occupancy loss (L_occ)')
+    parser.add_argument('--lambda_rho', type=float, default=0.5,
+                        help='SOCT: Weight for target area Huber loss (L_rho)')
+    parser.add_argument('--lambda_tau', type=float, default=0.1,
+                        help='SOCT: Weight for adaptive bandwidth regularization (L_tau)')
+    parser.add_argument('--use_scl', action='store_true', default=False,
+                        help='Enable Gram matrix SCL loss (ablation C4 only; removed from full model)')
+    parser.add_argument('--soct_outer_iter', type=int, default=10,
+                        help='SOCT: Dual projected gradient ascent iterations')
+    parser.add_argument('--soct_inner_iter', type=int, default=30,
+                        help='SOCT: Inner log-domain Sinkhorn iterations per dual update')
 
     # ====== Enhancement Parameters (NEW) ======
     parser.add_argument('--contrastive_weight', type=float, default=0.1,

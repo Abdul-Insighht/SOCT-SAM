@@ -291,8 +291,10 @@ def main():
     print(f"  Checkpoint: {args.resume}")
     print(f"  Device: {device}")
     print(f"  --- Enhancements ---")
+    print(f"  SOCT-SAM: {getattr(args, 'use_soct', True) and not getattr(args, 'no_soct', False)}")
     print(f"  Dynamic LoRA: {args.use_dynamic_lora}")
     print(f"  Contrastive Loss: {args.use_contrastive_loss}")
+    print(f"  Gram SCL Loss: {getattr(args, 'use_scl', False)}")
     print(f"  Multi-Scale OT: {args.use_multiscale_ot}")
     print(f"  OHEM Loss: {args.use_ohem_loss}")
     print(f"{'='*60}\n")
@@ -307,6 +309,17 @@ def main():
         use_contrastive_loss=args.use_contrastive_loss,
         use_multiscale_ot=args.use_multiscale_ot,
         use_ohem_loss=args.use_ohem_loss,
+        # SOCT-SAM (CVPR 2027 Proposed Full Model B6)
+        use_soct=getattr(args, 'use_soct', True) and not getattr(args, 'no_soct', False),
+        lambda_ord=getattr(args, 'lambda_ord', 5.0),
+        theta_anchor=getattr(args, 'theta_anchor', 0.1),
+        lambda_occ=getattr(args, 'lambda_occ', 1.0),
+        lambda_rho=getattr(args, 'lambda_rho', 0.5),
+        lambda_tau=getattr(args, 'lambda_tau', 0.1),
+        use_scl=getattr(args, 'use_scl', False),
+        soct_outer_iter=getattr(args, 'soct_outer_iter', 10),
+        soct_inner_iter=getattr(args, 'soct_inner_iter', 30),
+        # Enhancement params
         contrastive_weight=args.contrastive_weight,
         scl_weight=args.scl_weight,
         ohem_hard_ratio=args.ohem_hard_ratio,

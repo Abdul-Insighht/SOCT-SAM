@@ -26,6 +26,7 @@ python test.py \
     --image_size 504 \
     --lora_rank 16 \
     --lora_alpha 32.0 \
+    --use_soct \
     --eval_only \
     --visualize \
     --num_workers 4
