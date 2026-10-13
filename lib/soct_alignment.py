@@ -422,11 +422,13 @@ class SOCTAligner(nn.Module):
                 t_indices = list(range(seq_len))
                 relations = []
 
-            # If text_mask provided, exclude padding from target indices
+            # Boundary-safe filtering for target indices
+            t_indices = [idx for idx in t_indices if 0 <= idx < seq_len]
             if text_mask is not None:
-                t_indices = [idx for idx in t_indices if idx < seq_len and not text_mask[b_idx, idx].item()]
+                t_indices = [idx for idx in t_indices if not text_mask[b_idx, idx].item()]
             if not t_indices:
-                t_indices = [0]
+                valid_toks = [i for i in range(seq_len) if text_mask is None or not text_mask[b_idx, i].item()]
+                t_indices = [valid_toks[0]] if valid_toks else [0]
 
             for idx in t_indices:
                 target_col_mask[b_idx, idx] = True
@@ -446,6 +448,10 @@ class SOCTAligner(nn.Module):
             sample_omega = []
             sample_F_A = []
             for a_indices, direction in relations:
+                # Boundary-safe filtering for anchor indices
+                a_indices = [idx for idx in a_indices if 0 <= idx < seq_len]
+                if text_mask is not None:
+                    a_indices = [idx for idx in a_indices if not text_mask[b_idx, idx].item()]
                 if not a_indices:
                     continue
                 d_key = direction.lower()
