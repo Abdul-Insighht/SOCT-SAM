@@ -1,4 +1,4 @@
-"""
+r"""
 Grounding-Aware Prompt Generation from Target Occupancy for SOCT-SAM.
 Implementation of CVPR 2027 paper:
 "SOCT-SAM: Stochastic-Order Constrained Transport for Referring Remote Sensing Image Segmentation"

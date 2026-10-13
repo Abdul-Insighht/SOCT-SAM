@@ -1,4 +1,4 @@
-"""
+r"""
 SOCT (Stochastic-Order Constrained Transport) Feature Alignment Module.
 Implementation of CVPR 2027 paper:
 "SOCT-SAM: Stochastic-Order Constrained Transport for Referring Remote Sensing Image Segmentation"
