@@ -52,7 +52,7 @@ def test_forward(ckpt_path: str = None):
 
     model = Enhanced_RRSIS_UOT(
         sam3_ckpt=sam3_ckpt,
-        image_size=504,
+        image_size=800,
         lora_rank=4,
         lora_alpha=8.0,
         use_dynamic_lora=True,
@@ -64,9 +64,9 @@ def test_forward(ckpt_path: str = None):
         theta_anchor=0.1,
     )
     model = model.to(device).float()
-    
+
     B = 2
-    images = torch.randn(B, 3, 504, 504, device=device)
+    images = torch.randn(B, 3, 800, 800, device=device)
     captions = ["the small white plane to the left of the hangar", "a large ship on water"]
     
     print("Running Forward Pass...")

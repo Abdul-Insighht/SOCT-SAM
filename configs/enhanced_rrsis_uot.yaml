@@ -2,7 +2,7 @@
 # Extends RRSIS_SAM3 with 4 novel techniques
 
 # ====== Model ======
-image_size: 504          # Divisible by 14 (SAM3 ViT patch_size)
+image_size: 800          # Divisible by 14 (SAM3 ViT patch_size)
 lora_rank: 16            # LoRA rank for backbone adaptation
 lora_alpha: 32.0         # LoRA scaling factor
 freeze_backbone: true    # Freeze ViT backbone

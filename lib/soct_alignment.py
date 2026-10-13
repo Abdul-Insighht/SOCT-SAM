@@ -21,56 +21,38 @@ from typing import List, Dict, Tuple, Optional
 
 class GeometricAggregationOperator:
     """
-    Constructs normalized aggregation operators D_s mapping from the finest
-    feature grid (H_f, W_f) to coarse scale s (H_s, W_s) such that:
-    1^T D_s = 1^T, and D_f = I.
+    Continuous geometric aggregation operator D_s mapping spatial grids
+    with column-sum area preservation: 1^T D_s = 1^T, D_f = I.
+    Memory-efficient implementation: uses bilinear interpolation for adjoint lifting (D_s^T)
+    and area adaptive pooling for forward aggregation (D_s), eliminating O(N_f * N_s) dense allocations.
     """
     @staticmethod
-    def get_aggregation_matrix(
-        H_fine: int, W_fine: int,
-        H_coarse: int, W_coarse: int,
-        device: torch.device
-    ) -> torch.Tensor:
+    def lift_cost(cos_dist: torch.Tensor, H_fine: int, W_fine: int, H_coarse: int, W_coarse: int) -> torch.Tensor:
         """
-        Returns D_s of shape (N_coarse, N_fine) where N = H * W.
-        Uses normalized 2D spatial pooling weights.
+        Lifts coarse cost C^(s) to finest grid: D_s^T C^(s).
+        cos_dist: (B, N_coarse, seq_len)
+        Returns: (B, N_fine, seq_len)
         """
         if H_fine == H_coarse and W_fine == W_coarse:
-            return torch.eye(H_fine * W_fine, device=device, dtype=torch.float32)
+            return cos_dist
+        B, N_c, seq_len = cos_dist.shape
+        cost_2d = cos_dist.permute(0, 2, 1).view(B, seq_len, H_coarse, W_coarse)
+        lifted_2d = F.interpolate(cost_2d, size=(H_fine, W_fine), mode='bilinear', align_corners=False)
+        return lifted_2d.flatten(2).permute(0, 2, 1)
 
-        # Build pooling grid
-        scale_y = H_fine / H_coarse
-        scale_x = W_fine / W_coarse
-
-        # Create mapping tensor of shape (H_coarse, W_coarse, H_fine, W_fine)
-        # Using separable 1D pooling matrices for exact conservation
-        # D_y: (H_c, H_f), D_x: (W_c, W_f)
-        D_y = torch.zeros(H_coarse, H_fine, device=device, dtype=torch.float32)
-        D_x = torch.zeros(W_coarse, W_fine, device=device, dtype=torch.float32)
-
-        for c_y in range(H_coarse):
-            start_y = int(c_y * scale_y)
-            end_y = int(min(H_fine, (c_y + 1) * scale_y))
-            if end_y > start_y:
-                D_y[c_y, start_y:end_y] = 1.0 / (end_y - start_y)
-            else:
-                D_y[c_y, min(start_y, H_fine - 1)] = 1.0
-
-        for c_x in range(W_coarse):
-            start_x = int(c_x * scale_x)
-            end_x = int(min(W_fine, (c_x + 1) * scale_x))
-            if end_x > start_x:
-                D_x[c_x, start_x:end_x] = 1.0 / (end_x - start_x)
-            else:
-                D_x[c_x, min(start_x, W_fine - 1)] = 1.0
-
-        # Kronecker product for 2D aggregation matrix
-        # D_s: (H_c * W_c, H_f * W_f)
-        D_s = torch.kron(D_y, D_x)
-        # Ensure column sums sum to 1 (area conservation: 1^T D_s = 1^T)
-        col_sums = D_s.sum(dim=0, keepdim=True).clamp(min=1e-8)
-        D_s = D_s / col_sums
-        return D_s
+    @staticmethod
+    def aggregate_plan(P_fine: torch.Tensor, H_fine: int, W_fine: int, H_coarse: int, W_coarse: int) -> torch.Tensor:
+        """
+        Aggregates finest plan P* down to coarse scale s: D_s P*.
+        P_fine: (B, N_fine, K)
+        Returns: (B, N_coarse, K)
+        """
+        if H_fine == H_coarse and W_fine == W_coarse:
+            return P_fine
+        B, N_f, K = P_fine.shape
+        P_2d = P_fine.permute(0, 2, 1).view(B, K, H_fine, W_fine)
+        P_coarse_2d = F.adaptive_avg_pool2d(P_2d, (H_coarse, W_coarse))
+        return P_coarse_2d.flatten(2).permute(0, 2, 1)
 
 
 class DualConditionedSinkhorn(nn.Module):
@@ -379,13 +361,7 @@ class SOCTAligner(nn.Module):
         C_lifted_tokens = torch.zeros(B, N_f, seq_len, device=device, dtype=torch.float32)
 
         for s, (cos_dist, Hs, Ws) in enumerate(scale_costs):
-            D_s = GeometricAggregationOperator.get_aggregation_matrix(
-                H_f, W_f, Hs, Ws, device
-            ) # (N_s, N_f)
-            # Lift: D_s^T @ C^(s): (N_f, N_s) @ (B, N_s, seq_len) -> (B, N_f, seq_len)
-            # Batched: bmm(D_s^T, cos_dist)
-            D_s_T = D_s.transpose(0, 1).unsqueeze(0).expand(B, -1, -1)
-            lifted_s = torch.bmm(D_s_T, cos_dist)
+            lifted_s = GeometricAggregationOperator.lift_cost(cos_dist, H_f, W_f, Hs, Ws)
             C_lifted_tokens = C_lifted_tokens + w_scales[s] * lifted_s
 
         # 4. Null Column Cost: C_{j, null} = 2 * sigmoid(g_null([X_j^(f); z]))
@@ -417,7 +393,7 @@ class SOCTAligner(nn.Module):
         # r_pos: (N_f, 2), columns: (x, y)
         r_pos = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=-1)
 
-        G = max(H_f, W_f)
+        G = min(32, max(H_f, W_f))
         u_eval = torch.linspace(0.0, 1.0, G + 1, device=device) # (G+1,)
         tau_0 = 1.0 / G
         tau_min = tau_0 / 2.0
@@ -552,20 +528,14 @@ class SOCTAligner(nn.Module):
         # 8. Feature Fusion across scales using Target-Only transport values
         # P^(s) = D_s P* -> Target value A^(s) = diag(a^(s))^(-1) D_s (P*_T T_T^T)
         aligned_fpn = []
+        P_target_fine = P_targets_only[:, :, :-1] # (B, N_f, seq_len), exclude null
         for s, feat in enumerate(fpn_features):
             t_feat = feat.tensors if hasattr(feat, 'tensors') else feat
             Bs, Cs, Hs, Ws = t_feat.shape
             Ns = Hs * Ws
 
-            D_s = GeometricAggregationOperator.get_aggregation_matrix(
-                H_f, W_f, Hs, Ws, device
-            ) # (N_s, N_f)
-
             # Aggregate fine plan target slice to coarse: P_target_s = D_s @ P_target_fine
-            # (N_s, N_f) @ (B, N_f, seq_len) -> (B, N_s, seq_len)
-            D_s_batch = D_s.unsqueeze(0).expand(B, -1, -1)
-            P_target_fine = P_targets_only[:, :, :-1] # exclude null
-            P_target_s = torch.bmm(D_s_batch, P_target_fine) # (B, N_s, seq_len)
+            P_target_s = GeometricAggregationOperator.aggregate_plan(P_target_fine, H_f, W_f, Hs, Ws) # (B, N_s, seq_len)
 
             # Target transported values: A^(s) = N_s * P_target_s @ T
             A_s = torch.bmm(P_target_s * Ns, text_feats) # (B, N_s, C)

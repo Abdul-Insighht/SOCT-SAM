@@ -26,7 +26,7 @@ def get_parser():
                         help='Maximum text token length for SAM3 tokenizer')
 
     # ====== Model ======
-    parser.add_argument('--image_size', type=int, default=504,
+    parser.add_argument('--image_size', type=int, default=800,
                         help='Input image size (divisible by 14 for SAM3 ViT)')
     parser.add_argument('--lora_rank', type=int, default=16,
                         help='LoRA rank for vision backbone adaptation')
