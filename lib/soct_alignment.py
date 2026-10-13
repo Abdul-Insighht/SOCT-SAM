@@ -152,6 +152,9 @@ class DualConditionedSinkhorn(nn.Module):
         w_q = 1.0 / max(1, Q)
         c_q = lambda_ord * w_q
 
+        rho_safe = rho_hat.clamp(min=1e-4) # (B, 1)
+        t_indicator = target_col_mask.float().unsqueeze(1) # (B, 1, K_cols)
+
         # Step 1: Solve for optimal dual variables delta* via projected gradient ascent
         # Run dual search without tracking graph across all 10 outer iterations for memory efficiency
         with torch.no_grad():
