@@ -222,3 +222,52 @@ def init_distributed_mode(args):
         mkdir(args.output_dir)
     if args.model_id:
         mkdir(os.path.join('./models/', args.model_id))
+
+
+def resolve_sam3_ckpt(user_path=None):
+    """Auto-detect sam3.pt across filesystem and Kaggle inputs."""
+    import glob
+    if user_path and os.path.isfile(user_path):
+        return user_path
+
+    candidates = []
+    if user_path:
+        candidates.append(user_path)
+    candidates.extend([
+        "./pre-trained-weights/sam3.pt",
+        "../sam3_pre_trained_weights/sam3.pt",
+        "/kaggle/input/Weight_SAM3/sam3.pt",
+        "/kaggle/input/weight-sam3/sam3.pt",
+        "/kaggle/input/weight_sam3/sam3.pt",
+        "/kaggle/input/weightsam3/sam3.pt",
+        "/kaggle/input/datasets/habdulrehman/weight-sam3/sam3.pt",
+    ])
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+
+    # Recursive search in /kaggle/input
+    if os.path.exists("/kaggle/input"):
+        matches = glob.glob("/kaggle/input/**/sam3.pt", recursive=True)
+        if matches:
+            return matches[0]
+
+    return user_path or "./pre-trained-weights/sam3.pt"
+
+
+def resolve_data_root(user_path=None, dataset="rrsis_hr"):
+    """Auto-detect dataset refer directory in /kaggle/input."""
+    import glob
+    if user_path and os.path.exists(user_path):
+        return user_path
+
+    if os.path.exists("/kaggle/input"):
+        matches = glob.glob(f"/kaggle/input/**/{dataset}/**/refer", recursive=True)
+        if not matches:
+            matches = glob.glob(f"/kaggle/input/**/resis-hr/**/refer", recursive=True)
+        if not matches:
+            matches = glob.glob(f"/kaggle/input/**/refer", recursive=True)
+        if matches:
+            return matches[0]
+
+    return user_path or "./data/"

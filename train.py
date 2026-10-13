@@ -282,6 +282,17 @@ def main():
     print(f"  OHEM Loss: {args.use_ohem_loss} (hard_ratio={args.ohem_hard_ratio}, boundary_weight={args.boundary_loss_weight}, focal_gamma={args.focal_gamma})")
     print(f"{'='*60}\n")
 
+    # Auto-resolve sam3 checkpoint & data_root paths
+    resolved_sam3 = utils.resolve_sam3_ckpt(args.sam3_ckpt)
+    if resolved_sam3 != args.sam3_ckpt:
+        print(f"🔍 [INFO] Provided sam3_ckpt '{args.sam3_ckpt}' not found. Auto-resolved to: '{resolved_sam3}'")
+        args.sam3_ckpt = resolved_sam3
+
+    resolved_data = utils.resolve_data_root(args.data_root, args.dataset)
+    if resolved_data != args.data_root:
+        print(f"🔍 [INFO] Provided data_root '{args.data_root}' not found. Auto-resolved to: '{resolved_data}'")
+        args.data_root = resolved_data
+
     # ====== Build Enhanced Model ======
     print("Building Enhanced_RRSIS_UOT model (SOCT-SAM)...")
     model = Enhanced_RRSIS_UOT(
