@@ -455,6 +455,8 @@ def get_dataset(args, split='train', eval_mode=False):
         'rrsis_d': RRSISDDataset,
         'rrsis_hr': RRSISHRDataset,
         'rislad': RISLADDataset,
+        'ris_lad': RISLADDataset,
+        'ris-lad': RISLADDataset,
         'refsegrs': RefSegRSDataset,
     }
 

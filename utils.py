@@ -264,6 +264,9 @@ def resolve_data_root(user_path=None, dataset="rrsis_hr"):
     if os.path.exists("/kaggle/input"):
         matches = glob.glob(f"/kaggle/input/**/{dataset}/**/refer", recursive=True)
         if not matches:
+            clean_name = dataset.replace('_', '-').replace('-', '')
+            matches = glob.glob(f"/kaggle/input/**/*{clean_name}*/**/refer", recursive=True)
+        if not matches:
             matches = glob.glob(f"/kaggle/input/**/resis-hr/**/refer", recursive=True)
         if not matches:
             matches = glob.glob(f"/kaggle/input/**/refer", recursive=True)

@@ -15,8 +15,8 @@ def get_parser():
                         help='Path to resume training from checkpoint')
 
     # ====== Dataset ======
-    parser.add_argument('--dataset', type=str, default='refcoco',
-                        choices=['refsegrs', 'rrsis_d', 'rrsis_hr', 'rislad'],
+    parser.add_argument('--dataset', type=str, default='rrsis_d',
+                        choices=['refsegrs', 'rrsis_d', 'rrsis_hr', 'rislad', 'ris_lad', 'ris-lad'],
                         help='Dataset name')
     parser.add_argument('--split', type=str, default='train',
                         help='Data split (train/val/test)')
