@@ -75,6 +75,39 @@ class REFER:
                 self.DATA_DIR = p
                 break
 
+        def select_best_image_dir(candidates):
+            img_exts = ('.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp')
+            # 1. First priority: a directory that directly contains image files
+            for p in candidates:
+                if osp.exists(p) and osp.isdir(p):
+                    try:
+                        entries = os.listdir(p)
+                        if any(e.lower().endswith(img_exts) for e in entries):
+                            return p
+                    except Exception:
+                        pass
+            # 2. Second priority: a directory containing a subdirectory with image files (e.g. images/images, images/JPEGImages)
+            for p in candidates:
+                if osp.exists(p) and osp.isdir(p):
+                    try:
+                        for sub in os.listdir(p):
+                            sub_p = osp.join(p, sub)
+                            if osp.isdir(sub_p):
+                                sub_entries = os.listdir(sub_p)
+                                if any(e.lower().endswith(img_exts) for e in sub_entries):
+                                    return sub_p
+                    except Exception:
+                        pass
+            # 3. Third priority: first non-empty directory
+            for p in candidates:
+                if osp.exists(p) and osp.isdir(p):
+                    try:
+                        if len(os.listdir(p)) > 0:
+                            return p
+                    except Exception:
+                        pass
+            return candidates[0]
+
         dataset_key = dataset.lower()
         if dataset_key in ['refcoco', 'refcoco+', 'refcocog']:
             self.IMAGE_DIR = osp.join(data_root, 'images/mscoco/images/train2014')
@@ -91,11 +124,7 @@ class REFER:
                 osp.abspath(osp.join(data_root, '../JPEGImages')),
                 osp.abspath(osp.join(data_root, '../images')),
             ]
-            self.IMAGE_DIR = possible_image_dirs[0]
-            for p in possible_image_dirs:
-                if osp.exists(p) and len(os.listdir(p)) > 0:
-                    self.IMAGE_DIR = p
-                    break
+            self.IMAGE_DIR = select_best_image_dir(possible_image_dirs)
         elif dataset_key in ['rrsis_hr', 'rrsis-hr', 'rrsishr']:
             possible_image_dirs = [
                 osp.join(data_root, 'Images'),
@@ -106,11 +135,7 @@ class REFER:
                 osp.abspath(osp.join(data_root, '../Images')),
                 osp.abspath(osp.join(data_root, '../images')),
             ]
-            self.IMAGE_DIR = possible_image_dirs[0]
-            for p in possible_image_dirs:
-                if osp.exists(p) and len(os.listdir(p)) > 0:
-                    self.IMAGE_DIR = p
-                    break
+            self.IMAGE_DIR = select_best_image_dir(possible_image_dirs)
         elif dataset_key in ['rislad', 'ris_lad', 'ris-lad']:
             possible_image_dirs = [
                 osp.join(data_root, 'images'),
@@ -123,11 +148,7 @@ class REFER:
                 osp.abspath(osp.join(data_root, '../Images')),
                 osp.abspath(osp.join(data_root, '../JPEGImages')),
             ]
-            self.IMAGE_DIR = possible_image_dirs[0]
-            for p in possible_image_dirs:
-                if osp.exists(p) and len(os.listdir(p)) > 0:
-                    self.IMAGE_DIR = p
-                    break
+            self.IMAGE_DIR = select_best_image_dir(possible_image_dirs)
         else:
             print('No refer dataset is called [%s]' % dataset)
             sys.exit()

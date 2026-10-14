@@ -28,6 +28,54 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from transforms import TargetAwareZoomCrop, RandomHorizontalFlip
 
 
+def safe_load_image(image_dir, file_name, dataset_root=None, cache=None):
+    """
+    Safely load an image with multiple fallback strategies:
+    1. Direct match: image_dir / file_name
+    2. Extension variations: .jpg, .png, .tif, .jpeg, etc.
+    3. Recursive lookup via cache if file is in a nested subdirectory
+    """
+    # 1. Direct path
+    img_path = os.path.join(image_dir, file_name)
+    if os.path.isfile(img_path):
+        return Image.open(img_path).convert('RGB')
+
+    # 2. Check alternative extensions
+    base, _ = os.path.splitext(file_name)
+    for ext in ['.jpg', '.png', '.jpeg', '.tif', '.tiff', '.bmp', '.JPG', '.PNG', '.JPEG']:
+        cand = os.path.join(image_dir, base + ext)
+        if os.path.isfile(cand):
+            return Image.open(cand).convert('RGB')
+
+    # 3. Dynamic recursive search using cache
+    if cache is not None:
+        if not cache:
+            # Populate cache by scanning image_dir and dataset_root
+            search_dirs = [image_dir]
+            if dataset_root and os.path.exists(dataset_root) and dataset_root != image_dir:
+                search_dirs.append(dataset_root)
+            for sdir in search_dirs:
+                if os.path.exists(sdir):
+                    for root, _, files in os.walk(sdir):
+                        for f in files:
+                            fl = f.lower()
+                            if fl.endswith(('.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp')):
+                                f_base, _ = os.path.splitext(f)
+                                if f not in cache:
+                                    cache[f] = os.path.join(root, f)
+                                if f_base not in cache:
+                                    cache[f_base] = os.path.join(root, f)
+
+        # Lookup by exact filename
+        if file_name in cache:
+            return Image.open(cache[file_name]).convert('RGB')
+        # Lookup by base name without extension
+        if base in cache:
+            return Image.open(cache[base]).convert('RGB')
+
+    raise FileNotFoundError(f"Image '{file_name}' not found in '{image_dir}' or subdirectories.")
+
+
 # ============================================================
 # RRSIS-D Dataset (uses REFER API)
 # ============================================================
@@ -77,6 +125,7 @@ class RRSISDDataset(data.Dataset):
         else:
             self.images_to_mask = set()
 
+        self._img_cache = {}
         print(f"[RRSIS-D] Loaded {len(self.ref_ids)} samples for {split}")
 
     def __len__(self):
@@ -87,8 +136,10 @@ class RRSISDDataset(data.Dataset):
         this_img_id = self.refer.getImgIds(this_ref_id)
         this_img = self.refer.Imgs[this_img_id[0]]
 
-        # Load image
-        img = Image.open(os.path.join(self.refer.IMAGE_DIR, this_img['file_name'])).convert('RGB')
+        # Load image with fallback resolution
+        img = safe_load_image(self.refer.IMAGE_DIR, this_img['file_name'],
+                              dataset_root=os.path.dirname(self.refer.DATA_DIR),
+                              cache=self._img_cache)
 
         # Random occlusion augmentation
         if self.split == 'train' and this_ref_id in self.images_to_mask:
@@ -181,6 +232,7 @@ class RRSISHRDataset(data.Dataset):
         self.zoom_crop = TargetAwareZoomCrop(zoom_prob=0.5, small_threshold=0.1) if split == 'train' else None
         self.hflip = RandomHorizontalFlip(flip_prob=0.5) if split == 'train' else None
 
+        self._img_cache = {}
         print(f"[RRSIS-HR] Loaded {len(self.ref_ids)} samples for {split}")
 
     def __len__(self):
@@ -191,8 +243,10 @@ class RRSISHRDataset(data.Dataset):
         this_img_id = self.refer.getImgIds(this_ref_id)
         this_img = self.refer.Imgs[this_img_id[0]]
 
-        # Load image
-        img = Image.open(os.path.join(self.refer.IMAGE_DIR, this_img['file_name'])).convert('RGB')
+        # Load image with fallback resolution
+        img = safe_load_image(self.refer.IMAGE_DIR, this_img['file_name'],
+                              dataset_root=os.path.dirname(self.refer.DATA_DIR),
+                              cache=self._img_cache)
 
         # Load mask
         ref = self.refer.loadRefs(this_ref_id)
@@ -273,6 +327,7 @@ class RISLADDataset(data.Dataset):
         else:
             self.images_to_mask = set()
 
+        self._img_cache = {}
         print(f"[RISLAD] Loaded {len(self.ref_ids)} samples for {split}")
 
     def __len__(self):
@@ -283,8 +338,10 @@ class RISLADDataset(data.Dataset):
         this_img_id = self.refer.getImgIds(this_ref_id)
         this_img = self.refer.Imgs[this_img_id[0]]
 
-        # Load image
-        img = Image.open(os.path.join(self.refer.IMAGE_DIR, this_img['file_name'])).convert('RGB')
+        # Load image with fallback resolution
+        img = safe_load_image(self.refer.IMAGE_DIR, this_img['file_name'],
+                              dataset_root=os.path.dirname(self.refer.DATA_DIR),
+                              cache=self._img_cache)
 
         # Random occlusion augmentation
         if self.split == 'train' and this_ref_id in self.images_to_mask:
