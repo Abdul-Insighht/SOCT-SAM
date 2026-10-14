@@ -73,12 +73,27 @@ class REFER:
         elif dataset in ['rrsisd', 'rrsis_d']:
             self.IMAGE_DIR = osp.join(data_root, 'images/rrsisd/JPEGImages')
         elif dataset == 'rrsis_hr':
-            # Support multiple possible Kaggle structures
             possible_image_dirs = [
                 osp.join(data_root, 'Images'),
                 osp.join(data_root, 'data', 'images'),
                 osp.join(data_root, 'images', 'rrsis_hr'),
                 osp.abspath(osp.join(data_root, '../Images'))
+            ]
+            self.IMAGE_DIR = possible_image_dirs[0]
+            for p in possible_image_dirs:
+                if osp.exists(p) and len(os.listdir(p)) > 0:
+                    self.IMAGE_DIR = p
+                    break
+        elif dataset in ['rislad', 'ris_lad', 'ris-lad']:
+            possible_image_dirs = [
+                osp.join(data_root, 'images'),
+                osp.join(data_root, 'Images'),
+                osp.join(data_root, 'JPEGImages'),
+                osp.join(data_root, 'images', 'rislad'),
+                osp.join(data_root, 'data', 'images'),
+                osp.abspath(osp.join(data_root, '../images')),
+                osp.abspath(osp.join(data_root, '../Images')),
+                osp.abspath(osp.join(data_root, '../JPEGImages')),
             ]
             self.IMAGE_DIR = possible_image_dirs[0]
             for p in possible_image_dirs:
