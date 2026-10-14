@@ -56,6 +56,12 @@ class REFER:
             osp.join(data_root, 'ris_lad'),
             osp.join(data_root, 'rislad'),
             osp.join(data_root, 'ris-lad'),
+            osp.join(data_root, 'rrsis_hr'),
+            osp.join(data_root, 'rrsis-hr'),
+            osp.join(data_root, 'rrsishr'),
+            osp.join(data_root, 'rrsis_d'),
+            osp.join(data_root, 'rrsis-d'),
+            osp.join(data_root, 'rrsisd'),
             osp.join(data_root, 'data', dataset),         # /data_root/data/rrsis_hr
             osp.join(data_root, 'data', 'rrsisd'),        # Kaggle dataset has rrsisd inside data!
             osp.join(data_root, 'rrsisd'),
@@ -69,30 +75,49 @@ class REFER:
                 self.DATA_DIR = p
                 break
 
-        if dataset in ['refcoco', 'refcoco+', 'refcocog']:
+        dataset_key = dataset.lower()
+        if dataset_key in ['refcoco', 'refcoco+', 'refcocog']:
             self.IMAGE_DIR = osp.join(data_root, 'images/mscoco/images/train2014')
-        elif dataset == 'refclef':
+        elif dataset_key == 'refclef':
             self.IMAGE_DIR = osp.join(data_root, 'images/saiapr_tc-12')
-        elif dataset in ['rrsisd', 'rrsis_d']:
-            self.IMAGE_DIR = osp.join(data_root, 'images/rrsisd/JPEGImages')
-        elif dataset == 'rrsis_hr':
+        elif dataset_key in ['rrsisd', 'rrsis_d', 'rrsis-d']:
             possible_image_dirs = [
+                osp.join(data_root, 'images/rrsisd/JPEGImages'),
+                osp.join(data_root, 'images/rrsis_d/JPEGImages'),
+                osp.join(data_root, 'JPEGImages'),
+                osp.join(data_root, 'images'),
                 osp.join(data_root, 'Images'),
                 osp.join(data_root, 'data', 'images'),
-                osp.join(data_root, 'images', 'rrsis_hr'),
-                osp.abspath(osp.join(data_root, '../Images'))
+                osp.abspath(osp.join(data_root, '../JPEGImages')),
+                osp.abspath(osp.join(data_root, '../images')),
             ]
             self.IMAGE_DIR = possible_image_dirs[0]
             for p in possible_image_dirs:
                 if osp.exists(p) and len(os.listdir(p)) > 0:
                     self.IMAGE_DIR = p
                     break
-        elif dataset in ['rislad', 'ris_lad', 'ris-lad']:
+        elif dataset_key in ['rrsis_hr', 'rrsis-hr', 'rrsishr']:
+            possible_image_dirs = [
+                osp.join(data_root, 'Images'),
+                osp.join(data_root, 'images'),
+                osp.join(data_root, 'data', 'images'),
+                osp.join(data_root, 'images', 'rrsis_hr'),
+                osp.join(data_root, 'images', 'rrsis-hr'),
+                osp.abspath(osp.join(data_root, '../Images')),
+                osp.abspath(osp.join(data_root, '../images')),
+            ]
+            self.IMAGE_DIR = possible_image_dirs[0]
+            for p in possible_image_dirs:
+                if osp.exists(p) and len(os.listdir(p)) > 0:
+                    self.IMAGE_DIR = p
+                    break
+        elif dataset_key in ['rislad', 'ris_lad', 'ris-lad']:
             possible_image_dirs = [
                 osp.join(data_root, 'images'),
                 osp.join(data_root, 'Images'),
                 osp.join(data_root, 'JPEGImages'),
                 osp.join(data_root, 'images', 'rislad'),
+                osp.join(data_root, 'images', 'ris_lad'),
                 osp.join(data_root, 'data', 'images'),
                 osp.abspath(osp.join(data_root, '../images')),
                 osp.abspath(osp.join(data_root, '../Images')),

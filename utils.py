@@ -259,29 +259,59 @@ def resolve_sam3_ckpt(user_path=None):
 
 
 def resolve_data_root(user_path=None, dataset="rrsis_hr"):
-    """Auto-detect dataset refer directory in /kaggle/input."""
+    """Auto-detect dataset directory in /kaggle/input."""
     import glob
     if user_path and os.path.exists(user_path):
         return user_path
 
     if os.path.exists("/kaggle/input"):
-        for candidate in [
-            "/kaggle/input/RRSIS-low",
-            "/kaggle/input/rrsis-low",
-            "/kaggle/input/datasets/abdulahad0011/rrsis-low",
-            "/kaggle/input/ris-lad",
-            "/kaggle/input/ris_lad",
-            "/kaggle/input/rislad",
-        ]:
-            if os.path.exists(candidate):
-                return candidate
+        clean_ds = dataset.lower().replace('-', '_')
+        
+        # Dataset-specific Kaggle candidates
+        if clean_ds in ['ris_lad', 'rislad']:
+            for candidate in [
+                "/kaggle/input/RRSIS-low",
+                "/kaggle/input/rrsis-low",
+                "/kaggle/input/datasets/abdulahad0011/rrsis-low",
+                "/kaggle/input/ris-lad",
+                "/kaggle/input/ris_lad",
+                "/kaggle/input/rislad",
+            ]:
+                if os.path.exists(candidate):
+                    return candidate
+        elif clean_ds in ['rrsis_hr', 'rrsishr']:
+            for candidate in [
+                "/kaggle/input/rrsis-hr",
+                "/kaggle/input/rrsis_hr",
+                "/kaggle/input/RRSIS-HR",
+                "/kaggle/input/resis-hr",
+            ]:
+                if os.path.exists(candidate):
+                    return candidate
+        elif clean_ds in ['rrsis_d', 'rrsisd']:
+            for candidate in [
+                "/kaggle/input/rrsis-d",
+                "/kaggle/input/rrsis_d",
+                "/kaggle/input/RRSIS-D",
+                "/kaggle/input/rrsisd",
+            ]:
+                if os.path.exists(candidate):
+                    return candidate
+        elif clean_ds in ['refsegrs', 'refseg_rs']:
+            for candidate in [
+                "/kaggle/input/RefSegRS",
+                "/kaggle/input/refsegrs",
+                "/kaggle/input/refseg-rs",
+                "/kaggle/input/refseg_rs",
+            ]:
+                if os.path.exists(candidate):
+                    return candidate
 
+        # Recursive search for refer or dataset folder
         matches = glob.glob(f"/kaggle/input/**/{dataset}/**/refer", recursive=True)
         if not matches:
             clean_name = dataset.replace('_', '-').replace('-', '')
             matches = glob.glob(f"/kaggle/input/**/*{clean_name}*/**/refer", recursive=True)
-        if not matches:
-            matches = glob.glob(f"/kaggle/input/**/resis-hr/**/refer", recursive=True)
         if not matches:
             matches = glob.glob(f"/kaggle/input/**/refer", recursive=True)
         if matches:

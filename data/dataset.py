@@ -349,7 +349,18 @@ class RefSegRSDataset(data.Dataset):
         self.split = split
         self.eval_mode = eval_mode
         self.image_size = args.image_size
-        self.data_root = data_root or os.path.join(args.data_root, 'RefSegRS')
+        
+        # Robust data_root resolution for RefSegRS
+        if data_root and os.path.exists(data_root):
+            self.data_root = data_root
+        elif os.path.exists(os.path.join(args.data_root, 'RefSegRS')):
+            self.data_root = os.path.join(args.data_root, 'RefSegRS')
+        elif os.path.exists(os.path.join(args.data_root, 'refsegrs')):
+            self.data_root = os.path.join(args.data_root, 'refsegrs')
+        elif os.path.exists(os.path.join(args.data_root, 'refseg-rs')):
+            self.data_root = os.path.join(args.data_root, 'refseg-rs')
+        else:
+            self.data_root = args.data_root
 
         # Load data from text files
         self.imgs, self.labels, self.sentences = self._build_batches(split)
@@ -374,25 +385,66 @@ class RefSegRSDataset(data.Dataset):
     def _build_batches(self, split):
         """Load image/mask paths and captions from text files."""
         im_dir = os.path.join(self.data_root, 'images')
-        seg_dir = os.path.join(self.data_root, 'masks')
+        if not os.path.exists(im_dir):
+            for cand in ['Images', 'JPEGImages', 'img']:
+                cand_path = os.path.join(self.data_root, cand)
+                if os.path.exists(cand_path):
+                    im_dir = cand_path
+                    break
 
-        split_files = {
-            'train': 'output_phrase_train.txt',
-            'val': 'output_phrase_val.txt',
-            'test': 'output_phrase_test.txt',
-        }
-        set_file = os.path.join(self.data_root, split_files[split])
+        seg_dir = os.path.join(self.data_root, 'masks')
+        if not os.path.exists(seg_dir):
+            for cand in ['Masks', 'labels', 'Labels', 'annotations']:
+                cand_path = os.path.join(self.data_root, cand)
+                if os.path.exists(cand_path):
+                    seg_dir = cand_path
+                    break
+
+        split_files = [
+            f'output_phrase_{split}.txt',
+            f'output_phrases_{split}.txt',
+            f'{split}.txt',
+            f'output_{split}.txt',
+        ]
+        set_file = None
+        for sf in split_files:
+            candidate = os.path.join(self.data_root, sf)
+            if os.path.exists(candidate):
+                set_file = candidate
+                break
+
+        if set_file is None:
+            set_file = os.path.join(self.data_root, f'output_phrase_{split}.txt')
 
         all_imgs, all_labels, all_sentences = [], [], []
-        with open(set_file, 'r') as f:
-            for line in f.readlines():
-                parts = line.strip().split(' ')
-                img_name = parts[0]
-                sentence = ' '.join(parts[1:])
+        if os.path.exists(set_file):
+            with open(set_file, 'r') as f:
+                for line in f.readlines():
+                    parts = line.strip().split(' ')
+                    img_name = parts[0]
+                    sentence = ' '.join(parts[1:])
 
-                all_imgs.append(os.path.join(im_dir, img_name + '.tif'))
-                all_labels.append(os.path.join(seg_dir, img_name + '.tif'))
-                all_sentences.append(sentence)
+                    # Resolve image path with extension fallback
+                    img_p = os.path.join(im_dir, img_name + '.tif')
+                    if not os.path.exists(img_p):
+                        for ext in ['.png', '.jpg', '.jpeg', '']:
+                            cand = os.path.join(im_dir, img_name + ext)
+                            if os.path.exists(cand):
+                                img_p = cand
+                                break
+
+                    # Resolve label path with extension fallback
+                    lbl_p = os.path.join(seg_dir, img_name + '.tif')
+                    if not os.path.exists(lbl_p):
+                        for ext in ['.png', '.jpg', '.jpeg', '']:
+                            cand = os.path.join(seg_dir, img_name + ext)
+                            if os.path.exists(cand):
+                                lbl_p = cand
+                                break
+
+                    all_imgs.append(img_p)
+                    all_labels.append(lbl_p)
+                    all_sentences.append(sentence)
 
         return all_imgs, all_labels, all_sentences
 
@@ -452,18 +504,29 @@ def get_dataset(args, split='train', eval_mode=False):
         Dataset instance
     """
     dataset_map = {
+        # RRSIS-D
         'rrsis_d': RRSISDDataset,
+        'rrsis-d': RRSISDDataset,
+        'rrsisd': RRSISDDataset,
+        # RRSIS-HR
         'rrsis_hr': RRSISHRDataset,
+        'rrsis-hr': RRSISHRDataset,
+        'rrsishr': RRSISHRDataset,
+        # RIS-LAD
         'rislad': RISLADDataset,
         'ris_lad': RISLADDataset,
         'ris-lad': RISLADDataset,
+        # RefSegRS
         'refsegrs': RefSegRSDataset,
+        'refseg-rs': RefSegRSDataset,
+        'refseg_rs': RefSegRSDataset,
     }
 
-    if args.dataset not in dataset_map:
+    dataset_key = args.dataset.lower()
+    if dataset_key not in dataset_map:
         raise ValueError(f"Unknown dataset: {args.dataset}. Choose from {list(dataset_map.keys())}")
 
-    dataset_class = dataset_map[args.dataset]
+    dataset_class = dataset_map[dataset_key]
     return dataset_class(args, split=split, eval_mode=eval_mode)
 
 

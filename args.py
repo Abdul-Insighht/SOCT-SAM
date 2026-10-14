@@ -16,8 +16,13 @@ def get_parser():
 
     # ====== Dataset ======
     parser.add_argument('--dataset', type=str, default='rrsis_d',
-                        choices=['refsegrs', 'rrsis_d', 'rrsis_hr', 'rislad', 'ris_lad', 'ris-lad'],
-                        help='Dataset name')
+                        choices=[
+                            'rrsis_d', 'rrsis-d', 'rrsisd',
+                            'rrsis_hr', 'rrsis-hr', 'rrsishr',
+                            'rislad', 'ris_lad', 'ris-lad',
+                            'refsegrs', 'refseg-rs', 'refseg_rs'
+                        ],
+                        help='Dataset name: rrsis_d, rrsis_hr, ris-lad, refsegrs (hyphen & underscore aliases supported)')
     parser.add_argument('--split', type=str, default='train',
                         help='Data split (train/val/test)')
     parser.add_argument('--splitBy', type=str, default='unc',
