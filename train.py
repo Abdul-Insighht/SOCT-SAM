@@ -383,6 +383,10 @@ def main():
 
         start_epoch = ckpt.get('epoch', 0)
         best_iou = ckpt.get('best_iou', 0.0)
+        # Fix: If legacy checkpoint had unnormalized cumulative IoU (> 2.0), reset so new best models can be saved
+        if best_iou > 2.0:
+            print(f"  [Auto-Fix] Legacy unnormalized best_iou detected ({best_iou:.4f}). Resetting to 0.0 for proper normalized tracking.")
+            best_iou = 0.0
         print(f"  Resumed at epoch {start_epoch}, best_iou={best_iou:.4f}")
         
         # IMPORTANT FIX: Fast-forward the scheduler to the correct step
