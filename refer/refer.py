@@ -53,6 +53,9 @@ class REFER:
         ref_filename = 'refs(' + splitBy + ').p'
         possible_data_dirs = [
             osp.join(data_root, dataset),                 # /data_root/rrsis_hr
+            osp.join(data_root, 'ris_lad'),
+            osp.join(data_root, 'rislad'),
+            osp.join(data_root, 'ris-lad'),
             osp.join(data_root, 'data', dataset),         # /data_root/data/rrsis_hr
             osp.join(data_root, 'data', 'rrsisd'),        # Kaggle dataset has rrsisd inside data!
             osp.join(data_root, 'rrsisd'),

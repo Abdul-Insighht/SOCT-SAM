@@ -236,10 +236,13 @@ def resolve_sam3_ckpt(user_path=None):
     candidates.extend([
         "./pre-trained-weights/sam3.pt",
         "../sam3_pre_trained_weights/sam3.pt",
+        "/kaggle/input/SAM3_Weight/sam3.pt",
+        "/kaggle/input/sam3_weight/sam3.pt",
+        "/kaggle/input/sam3-weight/sam3.pt",
         "/kaggle/input/Weight_SAM3/sam3.pt",
         "/kaggle/input/weight-sam3/sam3.pt",
-        "/kaggle/input/weight_sam3/sam3.pt",
         "/kaggle/input/weightsam3/sam3.pt",
+        "/kaggle/input/datasets/abdulahad0011/sam3-weight/sam3.pt",
         "/kaggle/input/datasets/habdulrehman/weight-sam3/sam3.pt",
     ])
     for c in candidates:
@@ -262,6 +265,17 @@ def resolve_data_root(user_path=None, dataset="rrsis_hr"):
         return user_path
 
     if os.path.exists("/kaggle/input"):
+        for candidate in [
+            "/kaggle/input/RRSIS-low",
+            "/kaggle/input/rrsis-low",
+            "/kaggle/input/datasets/abdulahad0011/rrsis-low",
+            "/kaggle/input/ris-lad",
+            "/kaggle/input/ris_lad",
+            "/kaggle/input/rislad",
+        ]:
+            if os.path.exists(candidate):
+                return candidate
+
         matches = glob.glob(f"/kaggle/input/**/{dataset}/**/refer", recursive=True)
         if not matches:
             clean_name = dataset.replace('_', '-').replace('-', '')
