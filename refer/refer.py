@@ -384,22 +384,52 @@ class REFER:
             return {'mask': m, 'area': 0.0}
 
         try:
-            if isinstance(seg, list):
-                # Polygon format: [[x1, y1, x2, ...]] or [x1, y1, x2, ...]
-                if len(seg) > 0 and isinstance(seg[0], (int, float)):
-                    seg = [seg]
-                rle = mask.frPyObjects(seg, h, w)
+            if isinstance(seg, str):
+                # Single compressed RLE string
+                rle = {'size': [h, w], 'counts': seg.encode('utf-8')}
                 m = mask.decode(rle)
                 if m.ndim == 3:
                     m = np.sum(m, axis=2)
+            elif isinstance(seg, list):
+                if len(seg) == 0:
+                    m = np.zeros((h, w), dtype=np.uint8)
+                elif isinstance(seg[0], str):
+                    # List of compressed RLE strings
+                    m = np.zeros((h, w), dtype=np.uint8)
+                    for s in seg:
+                        rle = {'size': [h, w], 'counts': s.encode('utf-8') if isinstance(s, str) else s}
+                        part_m = mask.decode(rle)
+                        if part_m.ndim == 3:
+                            part_m = np.sum(part_m, axis=2)
+                        m = np.maximum(m, (part_m > 0).astype(np.uint8))
+                elif isinstance(seg[0], dict):
+                    # List of RLE dicts
+                    m = np.zeros((h, w), dtype=np.uint8)
+                    for d in seg:
+                        if isinstance(d.get('counts'), list):
+                            rle = mask.frPyObjects(d, h, w)
+                        else:
+                            counts = d.get('counts', '')
+                            rle = {'size': d.get('size', [h, w]), 'counts': counts.encode('utf-8') if isinstance(counts, str) else counts}
+                        part_m = mask.decode(rle)
+                        if part_m.ndim == 3:
+                            part_m = np.sum(part_m, axis=2)
+                        m = np.maximum(m, (part_m > 0).astype(np.uint8))
+                else:
+                    # Polygon format: [[x1, y1, x2, ...]] or [x1, y1, x2, ...]
+                    if isinstance(seg[0], (int, float)):
+                        seg = [seg]
+                    rle = mask.frPyObjects(seg, h, w)
+                    m = mask.decode(rle)
+                    if m.ndim == 3:
+                        m = np.sum(m, axis=2)
             elif isinstance(seg, dict):
                 # RLE format: either uncompressed (counts as list) or compressed (counts as str/bytes)
                 if isinstance(seg.get('counts'), list):
                     rle = mask.frPyObjects(seg, h, w)
                 else:
-                    rle = seg
-                    if isinstance(rle.get('counts'), str):
-                        rle = {'size': rle['size'], 'counts': rle['counts'].encode('utf-8')}
+                    counts = seg.get('counts', '')
+                    rle = {'size': seg.get('size', [h, w]), 'counts': counts.encode('utf-8') if isinstance(counts, str) else counts}
                 m = mask.decode(rle)
                 if m.ndim == 3:
                     m = np.sum(m, axis=2)
