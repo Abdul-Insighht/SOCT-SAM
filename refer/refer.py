@@ -342,13 +342,14 @@ class REFER:
         if seg_box == 'seg':
             ann_id = ref['ann_id']
             ann = self.Anns[ann_id]
-            polygons = []
-            color = []
-            c = 'none'
-            if type(ann['segmentation'][0]) == list:
+            seg = ann.get('segmentation', None)
+            if isinstance(seg, list) and len(seg) > 0 and isinstance(seg[0], list):
+                polygons = []
+                color = []
+                c = 'none'
                 # polygon used for refcoco*
-                for seg in ann['segmentation']:
-                    poly = np.array(seg).reshape((len(seg) / 2, 2))
+                for s in seg:
+                    poly = np.array(s).reshape((len(s) // 2, 2))
                     polygons.append(Polygon(poly, True, alpha=0.4))
                     color.append(c)
                 p = PatchCollection(polygons, facecolors=color, edgecolors=(1, 1, 0, 0), linewidths=3, alpha=1)
@@ -356,9 +357,8 @@ class REFER:
                 p = PatchCollection(polygons, facecolors=color, edgecolors=(1, 0, 0, 0), linewidths=1, alpha=1)
                 ax.add_collection(p)  # thin red polygon
             else:
-                # mask used for refclef
-                rle = ann['segmentation']
-                m = mask.decode(rle)
+                # mask used for RLE / refclef
+                m = self.getMask(ref)['mask']
                 img = np.ones((m.shape[0], m.shape[1], 3))
                 color_mask = np.array([2.0, 166.0, 101.0]) / 255
                 for i in range(3):
@@ -376,16 +376,43 @@ class REFER:
         # return mask, area and mask-center
         ann = self.refToAnn[ref['ref_id']]
         image = self.Imgs[ref['image_id']]
-        if type(ann['segmentation'][0]) == list:  # polygon
-            rle = mask.frPyObjects(ann['segmentation'], image['height'], image['width'])
-        else:
-            rle = ann['segmentation']
+        h, w = image['height'], image['width']
+        seg = ann.get('segmentation', None)
 
-        m = mask.decode(rle)
-        m = np.sum(m, axis=2)  # sometimes there are multiple binary map (corresponding to multiple segs)
-        m = m.astype(np.uint8)  # convert to np.uint8
-        # compute area
-        area = sum(mask.area(rle))  # should be close to ann['area']
+        if seg is None or len(seg) == 0:
+            m = np.zeros((h, w), dtype=np.uint8)
+            return {'mask': m, 'area': 0.0}
+
+        try:
+            if isinstance(seg, list):
+                # Polygon format: [[x1, y1, x2, ...]] or [x1, y1, x2, ...]
+                if len(seg) > 0 and isinstance(seg[0], (int, float)):
+                    seg = [seg]
+                rle = mask.frPyObjects(seg, h, w)
+                m = mask.decode(rle)
+                if m.ndim == 3:
+                    m = np.sum(m, axis=2)
+            elif isinstance(seg, dict):
+                # RLE format: either uncompressed (counts as list) or compressed (counts as str/bytes)
+                if isinstance(seg.get('counts'), list):
+                    rle = mask.frPyObjects(seg, h, w)
+                else:
+                    rle = seg
+                    if isinstance(rle.get('counts'), str):
+                        rle = {'size': rle['size'], 'counts': rle['counts'].encode('utf-8')}
+                m = mask.decode(rle)
+                if m.ndim == 3:
+                    m = np.sum(m, axis=2)
+            elif isinstance(seg, np.ndarray):
+                m = seg
+            else:
+                m = np.zeros((h, w), dtype=np.uint8)
+        except Exception as e:
+            print(f"[Warning] Failed to decode mask for ref_id {ref.get('ref_id', 'unknown')}: {e}")
+            m = np.zeros((h, w), dtype=np.uint8)
+
+        m = (m > 0).astype(np.uint8)
+        area = float(m.sum())
 
         return {'mask': m, 'area': area}
 

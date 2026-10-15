@@ -148,8 +148,7 @@ class RRSISDDataset(data.Dataset):
         # Load mask
         ref = self.refer.loadRefs(this_ref_id)
         ref_mask = np.array(self.refer.getMask(ref[0])['mask'])
-        annot = np.zeros(ref_mask.shape, dtype=np.uint8)
-        annot[ref_mask == 1] = 1
+        annot = (ref_mask > 0).astype(np.uint8)
 
         # Select caption
         if self.eval_mode:
@@ -251,8 +250,7 @@ class RRSISHRDataset(data.Dataset):
         # Load mask
         ref = self.refer.loadRefs(this_ref_id)
         ref_mask = np.array(self.refer.getMask(ref[0])['mask'])
-        annot = np.zeros(ref_mask.shape, dtype=np.uint8)
-        annot[ref_mask == 1] = 1
+        annot = (ref_mask > 0).astype(np.uint8)
 
         # Select caption
         if self.eval_mode:
@@ -350,8 +348,7 @@ class RISLADDataset(data.Dataset):
         # Load mask
         ref = self.refer.loadRefs(this_ref_id)
         ref_mask = np.array(self.refer.getMask(ref[0])['mask'])
-        annot = np.zeros(ref_mask.shape, dtype=np.uint8)
-        annot[ref_mask == 1] = 1
+        annot = (ref_mask > 0).astype(np.uint8)
 
         # Select caption
         if self.eval_mode:
