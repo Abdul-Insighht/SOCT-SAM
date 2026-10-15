@@ -359,45 +359,99 @@ def main():
     scheduler = get_scheduler(optimizer, args, steps_per_epoch)
     scaler = torch.amp.GradScaler('cuda', enabled=args.fp16)
 
+    # ====== Output Directory ======
+    os.makedirs(args.output_dir, exist_ok=True)
+
     # ====== Resume ======
     start_epoch = 0
     best_iou = 0.0
-    if args.resume and os.path.isfile(args.resume):
-        print(f"Resuming from {args.resume}")
-        ckpt = torch.load(args.resume, map_location='cpu', weights_only=False)
+    if args.resume:
+        resume_target = args.resume
+
+        # 1. If path is a directory (e.g. unzipped PyTorch archive from Kaggle dataset upload)
+        if os.path.isdir(resume_target):
+            found_dir = None
+            if os.path.exists(os.path.join(resume_target, 'data.pkl')):
+                found_dir = resume_target
+            else:
+                for root, _, files in os.walk(resume_target):
+                    if 'data.pkl' in files:
+                        found_dir = root
+                        break
+
+            if found_dir is not None:
+                print(f"[Resume] Detected unzipped PyTorch checkpoint archive at: {found_dir}")
+                reconstructed_pth = os.path.join(args.output_dir, 'reconstructed_resume.pth')
+                print(f"[Resume] Reassembling archive into '{reconstructed_pth}'...")
+                import zipfile
+                parent_dir = os.path.dirname(found_dir)
+                with zipfile.ZipFile(reconstructed_pth, 'w', compression=zipfile.ZIP_STORED) as z:
+                    for root, _, files in os.walk(found_dir):
+                        for f in files:
+                            full_path = os.path.join(root, f)
+                            rel_path = os.path.relpath(full_path, parent_dir)
+                            z.write(full_path, rel_path)
+                resume_target = reconstructed_pth
+                print(f"[Resume] Checkpoint file successfully reconstructed!")
+
+        # 2. If path doesn't directly exist, search common candidates
+        if not os.path.isfile(resume_target):
+            candidates = [
+                resume_target,
+                f"{resume_target}.pth",
+                os.path.join(resume_target, 'best_model.pth'),
+                os.path.join(resume_target, 'latest_model.pth'),
+                os.path.join('/kaggle/input', os.path.basename(resume_target)),
+                os.path.join('/kaggle/input/best_hr', os.path.basename(resume_target)),
+                os.path.join('/kaggle/input/best-hr', os.path.basename(resume_target)),
+                '/kaggle/input/best_hr/best_model.pth',
+                '/kaggle/input/best-hr/best_model.pth',
+                '/kaggle/working/best_model.pth',
+            ]
+            for cand in candidates:
+                if os.path.isfile(cand):
+                    resume_target = cand
+                    break
+
+        if not os.path.isfile(resume_target):
+            raise FileNotFoundError(
+                f"\n❌ [CRITICAL RESUME ERROR] --resume was provided ('{args.resume}'), but no valid checkpoint file (.pth) "
+                f"or unzipped PyTorch archive directory was found!\n"
+                f"Searched path: {resume_target}"
+            )
+
+        print(f"Resuming from {resume_target}")
+        ckpt = torch.load(resume_target, map_location='cpu', weights_only=False)
         model.load_state_dict(ckpt['model_state_dict'], strict=False)
         
         # Optionally load optimizer state, but update hyperparams to match new args
-        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
-        for param_group in optimizer.param_groups:
-            # Override weight decay with the newly passed arg
-            param_group['weight_decay'] = args.weight_decay
-            # Override learning rates with newly passed args based on group name
-            if 'name' in param_group:
-                if param_group['name'] == 'lora_adapters':
-                    param_group['lr'] = args.lr_backbone
-                elif param_group['name'] in ['enhancements', 'decoder']:
-                    param_group['lr'] = args.lr_decoder
-                else:
-                    param_group['lr'] = args.lr
+        if 'optimizer_state_dict' in ckpt:
+            try:
+                optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+                for param_group in optimizer.param_groups:
+                    param_group['weight_decay'] = args.weight_decay
+                    if 'name' in param_group:
+                        if param_group['name'] == 'lora_adapters':
+                            param_group['lr'] = args.lr_backbone
+                        elif param_group['name'] in ['enhancements', 'decoder']:
+                            param_group['lr'] = args.lr_decoder
+                        else:
+                            param_group['lr'] = args.lr
+            except Exception as e:
+                print(f"  [Warning] Could not load optimizer state (continuing with fresh optimizer): {e}")
 
         start_epoch = ckpt.get('epoch', 0)
         best_iou = ckpt.get('best_iou', 0.0)
-        # Fix: If legacy checkpoint had unnormalized cumulative IoU (> 2.0), reset so new best models can be saved
         if best_iou > 2.0:
             print(f"  [Auto-Fix] Legacy unnormalized best_iou detected ({best_iou:.4f}). Resetting to 0.0 for proper normalized tracking.")
             best_iou = 0.0
         print(f"  Resumed at epoch {start_epoch}, best_iou={best_iou:.4f}")
         
-        # IMPORTANT FIX: Fast-forward the scheduler to the correct step
-        # otherwise the learning rate will spike back to maximum!
+        # Fast-forward the scheduler to the correct step
         if start_epoch > 0:
-            print(f"  Catching up scheduler to epoch {start_epoch}...")
+            print(f"  Catching up scheduler to epoch {start_epoch} (fast-forwarding {start_epoch * steps_per_epoch} steps)...")
             for _ in range(start_epoch * steps_per_epoch):
                 scheduler.step()
-
-    # ====== Output Directory ======
-    os.makedirs(args.output_dir, exist_ok=True)
 
     # ====== Wandb ======
     if HAS_WANDB:

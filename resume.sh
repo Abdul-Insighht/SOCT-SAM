@@ -17,7 +17,17 @@ DATASET=${1:-rrsis_d}
 DATA_ROOT=${2:-./data}
 SAM3_CKPT=${3:-./pre-trained-weights/sam3.pt}
 OUTPUT_DIR="./output/${DATASET}_enhanced_uot"
-RESUME_CKPT="${OUTPUT_DIR}/latest_model.pth"
+RESUME_CKPT=${4:-"${OUTPUT_DIR}/latest_model.pth"}
+
+# Auto-detect checkpoint if default does not exist
+if [ ! -f "${RESUME_CKPT}" ] && [ ! -d "${RESUME_CKPT}" ]; then
+    for cand in "${OUTPUT_DIR}/best_model.pth" "/kaggle/input/best_hr/best_model" "/kaggle/input/best-hr/best_model" "/kaggle/input/best_hr" "/kaggle/input/best-hr" "/kaggle/working/best_model.pth"; do
+        if [ -f "${cand}" ] || [ -d "${cand}" ]; then
+            RESUME_CKPT="${cand}"
+            break
+        fi
+    done
+fi
 
 # Highlight setup information
 echo "=============================================================================="
@@ -31,8 +41,8 @@ echo "Optimizations: Cosine LR Floor | Weight Decay 0.03 | Fine-tuning LR"
 echo "=============================================================================="
 
 # Ensure the resume checkpoint exists
-if [ ! -f "${RESUME_CKPT}" ]; then
-    echo "[ERROR] Could not find the best model checkpoint at '${RESUME_CKPT}' to resume from!"
+if [ ! -f "${RESUME_CKPT}" ] && [ ! -d "${RESUME_CKPT}" ]; then
+    echo "[ERROR] Could not find the resume checkpoint file or directory at '${RESUME_CKPT}'!"
     exit 1
 fi
 
