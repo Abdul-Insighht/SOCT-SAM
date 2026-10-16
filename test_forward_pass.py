@@ -72,7 +72,8 @@ def test_forward(ckpt_path: str = None):
     print("Running Forward Pass...")
     try:
         with torch.no_grad():
-            outputs = model(images, captions)
+            with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+                outputs = model(images, captions)
             
         print("🎉 Forward pass successful!")
         print(f"Output mask shape: {outputs['pred_masks'].shape}")
