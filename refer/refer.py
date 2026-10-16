@@ -52,6 +52,10 @@ class REFER:
         # Robust DATA_DIR resolution for Kaggle
         ref_filename = 'refs(' + splitBy + ').p'
         possible_data_dirs = [
+            osp.join(data_root, 'Annotations'),
+            osp.join(data_root, 'annotations'),
+            osp.join(data_root, dataset, 'Annotations'),
+            osp.join(data_root, dataset, 'annotations'),
             osp.join(data_root, dataset),                 # /data_root/rrsis_hr
             osp.join(data_root, 'ris_lad'),
             osp.join(data_root, 'rislad'),
