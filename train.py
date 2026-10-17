@@ -218,10 +218,13 @@ def train_one_epoch(model, train_loader, optimizer, scheduler, scaler, device, e
         if (batch_idx + 1) % args.grad_accum_steps == 0:
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            scale_before = scaler.get_scale()
             scaler.step(optimizer)
             scaler.update()
+            scale_after = scaler.get_scale()
             optimizer.zero_grad()
-            scheduler.step()
+            if scale_before <= scale_after:
+                scheduler.step()
 
         # Metrics
         with torch.no_grad():
@@ -251,10 +254,13 @@ def train_one_epoch(model, train_loader, optimizer, scheduler, scaler, device, e
     if len(train_loader) % args.grad_accum_steps != 0:
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        scale_before = scaler.get_scale()
         scaler.step(optimizer)
         scaler.update()
+        scale_after = scaler.get_scale()
         optimizer.zero_grad()
-        scheduler.step()
+        if scale_before <= scale_after:
+            scheduler.step()
 
     return metric_logger.meters['loss'].global_avg, metric_logger.meters['iou'].global_avg
 

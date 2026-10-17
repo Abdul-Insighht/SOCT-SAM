@@ -113,7 +113,7 @@ def get_parser():
                         help='Learning rate for decoder/seg head')
     parser.add_argument('--weight_decay', type=float, default=1e-2,
                         help='Weight decay')
-    parser.add_argument('--warmup_epochs', type=int, default=5,
+    parser.add_argument('--warmup_epochs', type=int, default=0,
                         help='Number of warmup epochs')
     parser.add_argument('--grad_accum_steps', type=int, default=4,
                         help='Gradient accumulation steps (effective batch = batch_size * accum)')
