@@ -119,15 +119,19 @@ def get_optimizer(model, args):
 
 
 def get_scheduler(optimizer, args, steps_per_epoch):
-    """Create learning rate scheduler with warmup."""
+    """Create learning rate scheduler with warmup and minimum LR floor to prevent plateaus."""
     total_steps = args.epochs * steps_per_epoch
-    warmup_steps = args.warmup_epochs * steps_per_epoch
+    warmup_steps = getattr(args, 'warmup_epochs', 1) * steps_per_epoch
+    min_lr_ratio = getattr(args, 'min_lr_ratio', 0.10)
 
     def lr_lambda(current_step):
-        if current_step < warmup_steps:
+        if warmup_steps > 0 and current_step < warmup_steps:
             return float(current_step) / float(max(1, warmup_steps))
         progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-        return max(0.0, 0.5 * (1.0 + np.cos(np.pi * progress)))
+        progress = min(1.0, max(0.0, progress))
+        cosine_decay = 0.5 * (1.0 + np.cos(np.pi * progress))
+        # Keep a 10% LR floor so late epochs never freeze into a plateau
+        return (1.0 - min_lr_ratio) * cosine_decay + min_lr_ratio
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     return scheduler
