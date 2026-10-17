@@ -147,8 +147,8 @@ def get_parser():
     # ====== Evaluation ======
     parser.add_argument('--eval_only', action='store_true', default=False,
                         help='Run evaluation only')
-    parser.add_argument('--visualize', action='store_true', default=False,
-                        help='Save visualization of predictions')
+    parser.add_argument('--visualize', '--save_vis', action='store_true', default=False,
+                        dest='visualize', help='Save visualization of predictions')
 
     return parser
 
