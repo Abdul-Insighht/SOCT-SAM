@@ -138,7 +138,7 @@ def get_scheduler(optimizer, args, steps_per_epoch):
 
 
 @torch.no_grad()
-def validate(model, val_loader, device, epoch):
+def validate(model, val_loader, device, epoch, args=None):
     """Run validation and compute metrics."""
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -516,7 +516,7 @@ def main():
         )
 
         # Validate
-        val_iou, val_overall_iou = validate(model, val_loader, device, epoch + 1)
+        val_iou, val_overall_iou = validate(model, val_loader, device, epoch + 1, args)
         
         print('Average object IoU {}'.format(val_iou))
         print('Overall IoU {}'.format(val_overall_iou))
