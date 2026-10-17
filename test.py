@@ -143,18 +143,31 @@ def evaluate(model, test_loader, device, args):
 
 
 @torch.no_grad()
-def save_predictions(model, test_loader, device, output_dir, args):
-    """Save predicted masks as images for visualization side-by-side with original and GT."""
+def save_predictions(model, test_loader, device, vis_dir, args):
+    """Save predicted masks as images for visualization side-by-side with original and GT.
+    
+    Generates a publication-grade horizontal 3-panel figure:
+      Panel 1: (a) Ground Truth (Original image duplicate + GT mask in Green)
+      Panel 2: (b) SOCT-SAM Prediction (Original image duplicate + Pred mask in Red + Sample IoU)
+      Panel 3: (c) Overlap Mask (Original image duplicate + Overlap comparison: Yellow=Overlap, Red=Pred, Green=GT)
+    """
     import cv2
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     model.eval()
-    vis_dir = os.path.join(output_dir, 'visualizations')
     os.makedirs(vis_dir, exist_ok=True)
 
-    print("\nSaving visualizations...")
+    def draw_mask_contour(img, mask_bool, color_rgb, thickness=2):
+        mask_u8 = (mask_bool.astype(np.uint8)) * 255
+        contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(img, contours, -1, color_rgb, thickness, cv2.LINE_AA)
+
+    print(f"\nSaving visualizations to: {vis_dir}")
+    saved_count = 0
+    max_to_save = getattr(args, 'max_vis', 50)
+
     for batch_idx, (images, masks, captions) in enumerate(test_loader):
-        if batch_idx >= 50:
+        if max_to_save > 0 and saved_count >= max_to_save:
             break
 
         images = images.to(device)
@@ -170,6 +183,9 @@ def save_predictions(model, test_loader, device, output_dir, args):
         pred_binary = (pred_probs > 0.5).float()
 
         for i in range(images.size(0)):
+            if max_to_save > 0 and saved_count >= max_to_save:
+                break
+
             # 1. Original Image [H, W, 3] in RGB range [0, 255]
             img_tensor = images[i].cpu().permute(1, 2, 0).numpy()
             orig_img_np = np.clip(img_tensor * 255.0, 0, 255).astype(np.uint8)
@@ -179,55 +195,79 @@ def save_predictions(model, test_loader, device, output_dir, args):
             gt_mask_np = masks[i, 0].cpu().numpy()
             pred_mask_np = pred_binary[i, 0].cpu().numpy()
 
-            # 3. Create Combined Overlay
-            combined_overlay_np = orig_img_np.copy()
-            
             gt_indices = (gt_mask_np > 0)
             pred_indices = (pred_mask_np > 0)
-            
-            # Green color for GT
+
+            # Mask color palettes (in RGB)
             gt_color = np.zeros_like(orig_img_np)
-            gt_color[:, :, 1] = 255  # Green in RGB
-            
-            # Red color for Pred
+            gt_color[:, :, 1] = 255  # Green
+
             pred_color = np.zeros_like(orig_img_np)
-            pred_color[:, :, 0] = 255  # Red in RGB
-            
-            # Yellow color for Overlap (both GT and Pred)
+            pred_color[:, :, 0] = 255  # Red
+
             yellow_color = np.zeros_like(orig_img_np)
-            yellow_color[:, :, 0] = 255  # Red
-            yellow_color[:, :, 1] = 255  # Green
-            
-            # Masks logical combinations
+            yellow_color[:, :, 0] = 255  # Red + Green = Yellow
+            yellow_color[:, :, 1] = 255
+
+            # Logical combinations
             gt_only = gt_indices & ~pred_indices
             pred_only = pred_indices & ~gt_indices
             both = gt_indices & pred_indices
-            
-            # Blend GT only (Green, e.g. 0.6 * orig + 0.4 * green)
-            combined_overlay_np[gt_only] = (0.6 * orig_img_np[gt_only] + 0.4 * gt_color[gt_only]).astype(np.uint8)
-            # Blend Pred only (Red, e.g. 0.6 * orig + 0.4 * red)
-            combined_overlay_np[pred_only] = (0.6 * orig_img_np[pred_only] + 0.4 * pred_color[pred_only]).astype(np.uint8)
-            # Blend Both (Yellow, e.g. 0.5 * orig + 0.5 * yellow)
-            combined_overlay_np[both] = (0.5 * orig_img_np[both] + 0.5 * yellow_color[both]).astype(np.uint8)
+
+            # Panel 1: (a) Ground Truth (1st duplicate of image)
+            panel_gt = orig_img_np.copy()
+            if gt_indices.any():
+                panel_gt[gt_indices] = (0.55 * orig_img_np[gt_indices] + 0.45 * gt_color[gt_indices]).astype(np.uint8)
+                draw_mask_contour(panel_gt, gt_indices, (0, 255, 0), thickness=2)
+
+            # Panel 2: (b) Model Prediction (2nd duplicate of image)
+            panel_pred = orig_img_np.copy()
+            if pred_indices.any():
+                panel_pred[pred_indices] = (0.55 * orig_img_np[pred_indices] + 0.45 * pred_color[pred_indices]).astype(np.uint8)
+                draw_mask_contour(panel_pred, pred_indices, (255, 50, 50), thickness=2)
+
+            # Panel 3: (c) Overlap Mask (3rd duplicate of image)
+            panel_overlap = orig_img_np.copy()
+            if gt_only.any():
+                panel_overlap[gt_only] = (0.55 * orig_img_np[gt_only] + 0.45 * gt_color[gt_only]).astype(np.uint8)
+                draw_mask_contour(panel_overlap, gt_only, (0, 255, 0), thickness=2)
+            if pred_only.any():
+                panel_overlap[pred_only] = (0.55 * orig_img_np[pred_only] + 0.45 * pred_color[pred_only]).astype(np.uint8)
+                draw_mask_contour(panel_overlap, pred_only, (255, 50, 50), thickness=2)
+            if both.any():
+                panel_overlap[both] = (0.50 * orig_img_np[both] + 0.50 * yellow_color[both]).astype(np.uint8)
+                draw_mask_contour(panel_overlap, both, (255, 255, 0), thickness=2)
 
             # Calculate individual sample IoU
             intersection_val = np.logical_and(gt_indices, pred_indices).sum()
             union_val = np.logical_or(gt_indices, pred_indices).sum()
             sample_iou = (intersection_val + 1e-6) / (union_val + 1e-6)
 
-            # 4. Font and sizes
             font = cv2.FONT_HERSHEY_SIMPLEX
-            thickness = 1
 
-            # 5. Create text banner for complete caption query at the top (NEVER truncate)
+            # Subtitle bar at bottom of each panel
+            sub_h = 42
+            panel_specs = [
+                (panel_gt, "(a) Ground Truth", (0, 255, 120)),
+                (panel_pred, f"(b) Prediction (IoU: {sample_iou * 100:.2f}%)", (255, 120, 120)),
+                (panel_overlap, "(c) Mask (Yellow: Overlap, Red: Pred, Green: GT)", (0, 240, 255)),
+            ]
+            for panel, text_label, text_col in panel_specs:
+                cv2.rectangle(panel, (0, h - sub_h), (w, h), (18, 18, 18), -1)
+                cv2.putText(panel, text_label, (15, h - 14), font, 0.65, text_col, 2, lineType=cv2.LINE_AA)
+
+            # Combine 3 duplicate panels horizontally with a sleek vertical divider
+            divider = np.zeros((h, 4, 3), dtype=np.uint8) + 40
+            triplet_img = np.hstack([panel_gt, divider, panel_pred, divider, panel_overlap])
+            total_w = triplet_img.shape[1]
+
+            # 4. Text banner on top of full width (NEVER truncate)
             caption = captions[i]
             if isinstance(caption, list):
-                caption = caption[0]  # Show the one that was evaluated
+                caption = caption[0]
             caption_str = str(caption)
 
-            # Split caption into multiple lines based on image width
-            combined_w = w
-            max_char = max(35, int(combined_w / 7.5))
+            max_char = max(70, int(total_w / 16))
             words = caption_str.split(' ')
             lines = []
             current_line = []
@@ -243,56 +283,40 @@ def save_predictions(model, test_loader, device, output_dir, args):
             if current_line:
                 lines.append(' '.join(current_line))
 
-            # Banner height accommodates ALL lines of text + legend + IoU
-            banner_h = 45 + (len(lines) + 1) * 24
-            banner = np.zeros((banner_h, combined_w, 3), dtype=np.uint8)
+            banner_h = 60 + len(lines) * 28
+            banner = np.zeros((banner_h, total_w, 3), dtype=np.uint8) + 16
 
-            text_color = (255, 255, 255)
             for idx, line in enumerate(lines):
-                y_pos = 24 + idx * 22
+                y_pos = 30 + idx * 26
                 cv2.putText(banner, f"Query: {line}" if idx == 0 else f"       {line}", 
-                            (15, y_pos), font, 0.48, text_color, thickness, cv2.LINE_AA)
+                            (20, y_pos), font, 0.70, (255, 255, 255), 2, cv2.LINE_AA)
 
-            # Draw legend line and IoU
-            y_pos_legend = 25 + len(lines) * 22
-            legend_prefix = "Legend: "
-            cv2.putText(banner, legend_prefix, (15, y_pos_legend), font, 0.45, (200, 200, 200), thickness, cv2.LINE_AA)
-            
-            x_offset = 75
-            
-            # GT dot (Green) and text
-            cv2.circle(banner, (x_offset + 5, y_pos_legend - 4), 4, (0, 255, 0), -1)
-            cv2.putText(banner, "GT", (x_offset + 15, y_pos_legend), font, 0.42, (200, 200, 200), thickness, cv2.LINE_AA)
-            x_offset += 45
-            
-            # Pred dot (Red) and text
-            cv2.circle(banner, (x_offset + 5, y_pos_legend - 4), 4, (255, 0, 0), -1)
-            cv2.putText(banner, "Pred", (x_offset + 15, y_pos_legend), font, 0.42, (200, 200, 200), thickness, cv2.LINE_AA)
-            x_offset += 55
-            
-            # Overlap dot (Yellow) and text
-            cv2.circle(banner, (x_offset + 5, y_pos_legend - 4), 4, (255, 255, 0), -1)
-            cv2.putText(banner, "Overlap", (x_offset + 15, y_pos_legend), font, 0.42, (200, 200, 200), thickness, cv2.LINE_AA)
-            x_offset += 75
+            y_sub = 30 + len(lines) * 26
+            split_name = getattr(args, 'split', 'test')
+            cv2.putText(banner, f"Model: SOCT-SAM (Ours)   |   Sample IoU: {sample_iou * 100:.2f}%   |   Split: {split_name}", 
+                        (20, y_sub), font, 0.58, (0, 240, 255), 1, cv2.LINE_AA)
 
-            # Display exact Sample IoU score
-            iou_str = f"IoU: {sample_iou * 100:.2f}%"
-            cv2.putText(banner, iou_str, (x_offset, y_pos_legend), font, 0.46, (0, 255, 255), 1, cv2.LINE_AA)
+            # 5. Stack banner on top of the 3-panel image
+            final_img = np.vstack([banner, triplet_img])
 
-            # 6. Combine banner and overlay
-            final_img = np.vstack([banner, combined_overlay_np])
-
-            # 7. Save image and companion text query file
+            # 6. Save image under both naming conventions (so file viewer opens it directly)
             file_prefix = f'sample_{batch_idx}_{i}'
             vis_img = Image.fromarray(final_img)
             vis_img.save(os.path.join(vis_dir, f'{file_prefix}_combined.png'))
+            vis_img.save(os.path.join(vis_dir, f'{file_prefix}_3panel.png'))
 
-            # Also save full text metadata file for easy copy-pasting into paper
             with open(os.path.join(vis_dir, f'{file_prefix}_info.txt'), 'w', encoding='utf-8') as f_meta:
+                f_meta.write(f"Sample: batch_{batch_idx}_sample_{i}\n")
                 f_meta.write(f"Query Expression: {caption_str}\n")
                 f_meta.write(f"Sample IoU: {sample_iou * 100:.2f}%\n")
+                f_meta.write(f"Ground Truth Pixels: {int(gt_indices.sum())}\n")
+                f_meta.write(f"Predicted Pixels: {int(pred_indices.sum())}\n")
+                f_meta.write(f"Intersection Pixels: {int(intersection_val)}\n")
+                f_meta.write(f"Union Pixels: {int(union_val)}\n")
 
-    print(f"  Saved visualizations to {vis_dir}")
+            saved_count += 1
+
+    print(f"  Successfully saved {saved_count} visualizations to {vis_dir}")
 
 
 def main():
