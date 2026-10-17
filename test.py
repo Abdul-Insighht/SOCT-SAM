@@ -413,13 +413,29 @@ def main():
     print(f"  P@0.9: {results['P@0.9']*100:.2f}%")
     print(f"  Samples: {results['num_samples']}")
     print(f"  Avg Time: {results['avg_time']*1000:.1f}ms")
-    print(f"{'='*60}")
+    # ====== Save Results to TXT File ======
+    res_file = os.path.join(args.output_dir, f'results_{args.split}.txt')
+    with open(res_file, 'w', encoding='utf-8') as f:
+        f.write(f"Results on {args.dataset} ({args.split})\n")
+        f.write(f"Checkpoint: {resume_path}\n")
+        f.write(f"{'='*40}\n")
+        f.write(f"mIoU:  {results['mIoU']*100:.2f}%\n")
+        f.write(f"oIoU:  {results['oIoU']*100:.2f}%\n")
+        f.write(f"P@0.5: {results['P@0.5']*100:.2f}%\n")
+        f.write(f"P@0.6: {results['P@0.6']*100:.2f}%\n")
+        f.write(f"P@0.7: {results['P@0.7']*100:.2f}%\n")
+        f.write(f"P@0.8: {results['P@0.8']*100:.2f}%\n")
+        f.write(f"P@0.9: {results['P@0.9']*100:.2f}%\n")
+        f.write(f"Samples: {results['num_samples']}\n")
+        f.write(f"Avg Time: {results['avg_time']*1000:.1f}ms\n")
+    print(f"📄 Full metrics saved to: {res_file}")
 
     # ====== Save Visualizations ======
     if args.visualize:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        save_predictions(model, test_loader, device, args.output_dir, args)
+        vis_save_dir = os.path.join(args.output_dir, f'visualizations_{args.split}')
+        save_predictions(model, test_loader, device, vis_save_dir, args)
 
 
 if __name__ == '__main__':
