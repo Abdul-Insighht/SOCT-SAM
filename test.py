@@ -142,9 +142,12 @@ def evaluate(model, test_loader, device, args):
     return results
 
 
+@torch.no_grad()
 def save_predictions(model, test_loader, device, output_dir, args):
     """Save predicted masks as images for visualization side-by-side with original and GT."""
     import cv2
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     model.eval()
     vis_dir = os.path.join(output_dir, 'visualizations')
     os.makedirs(vis_dir, exist_ok=True)
@@ -355,14 +358,29 @@ def main():
     )
 
     # Load trained weights
-    if args.resume and os.path.isfile(args.resume):
-        print(f"Loading checkpoint: {args.resume}")
-        ckpt = torch.load(args.resume, map_location='cpu', weights_only=False)
+    resume_path = args.resume
+    if resume_path and not os.path.isfile(resume_path):
+        candidates = [
+            os.path.join(os.path.dirname(resume_path), 'best_model.pth'),
+            os.path.join(args.output_dir, 'best_model.pth'),
+            os.path.join(args.output_dir, 'checkpoint_epoch30.pth'),
+            os.path.join(args.output_dir, 'latest_model.pth'),
+        ]
+        for cand in candidates:
+            if os.path.isfile(cand):
+                print(f"🔍 [AUTO-RESOLVE] Provided checkpoint '{resume_path}' not found.")
+                print(f"    Auto-resolved to: '{cand}'")
+                resume_path = cand
+                break
+
+    if resume_path and os.path.isfile(resume_path):
+        print(f"Loading checkpoint: {resume_path}")
+        ckpt = torch.load(resume_path, map_location='cpu', weights_only=False)
         model.load_state_dict(ckpt['model_state_dict'], strict=False)
         print(f"  Loaded from epoch {ckpt.get('epoch', '?')}, "
               f"best_iou={ckpt.get('best_iou', '?')}")
     else:
-        print("WARNING: No checkpoint provided, evaluating with pretrained SAM3 only!")
+        print(f"WARNING: Checkpoint '{args.resume}' not found! Evaluating with pretrained SAM3 only!")
 
     model = model.to(device)
     model.eval()
@@ -399,6 +417,8 @@ def main():
 
     # ====== Save Visualizations ======
     if args.visualize:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         save_predictions(model, test_loader, device, args.output_dir, args)
 
 
