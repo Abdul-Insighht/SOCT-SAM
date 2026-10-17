@@ -206,19 +206,24 @@ def save_predictions(model, test_loader, device, output_dir, args):
             # Blend Both (Yellow, e.g. 0.5 * orig + 0.5 * yellow)
             combined_overlay_np[both] = (0.5 * orig_img_np[both] + 0.5 * yellow_color[both]).astype(np.uint8)
 
+            # Calculate individual sample IoU
+            intersection_val = np.logical_and(gt_indices, pred_indices).sum()
+            union_val = np.logical_or(gt_indices, pred_indices).sum()
+            sample_iou = (intersection_val + 1e-6) / (union_val + 1e-6)
+
             # 4. Font and sizes
             font = cv2.FONT_HERSHEY_SIMPLEX
             thickness = 1
 
-            # 5. Create text banner for caption query at the top
+            # 5. Create text banner for complete caption query at the top (NEVER truncate)
             caption = captions[i]
             if isinstance(caption, list):
                 caption = caption[0]  # Show the one that was evaluated
             caption_str = str(caption)
 
-            # Split caption into multiple lines if too long to fit
+            # Split caption into multiple lines based on image width
             combined_w = w
-            max_char = max(30, int(combined_w / 6.5))
+            max_char = max(35, int(combined_w / 7.5))
             words = caption_str.split(' ')
             lines = []
             current_line = []
@@ -234,47 +239,54 @@ def save_predictions(model, test_loader, device, output_dir, args):
             if current_line:
                 lines.append(' '.join(current_line))
 
-            if len(lines) > 3:
-                lines = lines[:3]
-                lines[-1] += "..."
-
-            banner_h = 45 + (len(lines) + 1) * 22
+            # Banner height accommodates ALL lines of text + legend + IoU
+            banner_h = 45 + (len(lines) + 1) * 24
             banner = np.zeros((banner_h, combined_w, 3), dtype=np.uint8)
 
             text_color = (255, 255, 255)
             for idx, line in enumerate(lines):
-                y_pos = 25 + idx * 22
+                y_pos = 24 + idx * 22
                 cv2.putText(banner, f"Query: {line}" if idx == 0 else f"       {line}", 
-                            (15, y_pos), font, 0.45, text_color, thickness, cv2.LINE_AA)
+                            (15, y_pos), font, 0.48, text_color, thickness, cv2.LINE_AA)
 
-            # Draw legend line
+            # Draw legend line and IoU
             y_pos_legend = 25 + len(lines) * 22
             legend_prefix = "Legend: "
             cv2.putText(banner, legend_prefix, (15, y_pos_legend), font, 0.45, (200, 200, 200), thickness, cv2.LINE_AA)
             
-            # Start drawing colored circles and labels
             x_offset = 75
             
             # GT dot (Green) and text
             cv2.circle(banner, (x_offset + 5, y_pos_legend - 4), 4, (0, 255, 0), -1)
-            cv2.putText(banner, "GT", (x_offset + 15, y_pos_legend), font, 0.4, (200, 200, 200), thickness, cv2.LINE_AA)
+            cv2.putText(banner, "GT", (x_offset + 15, y_pos_legend), font, 0.42, (200, 200, 200), thickness, cv2.LINE_AA)
             x_offset += 45
             
             # Pred dot (Red) and text
             cv2.circle(banner, (x_offset + 5, y_pos_legend - 4), 4, (255, 0, 0), -1)
-            cv2.putText(banner, "Pred", (x_offset + 15, y_pos_legend), font, 0.4, (200, 200, 200), thickness, cv2.LINE_AA)
+            cv2.putText(banner, "Pred", (x_offset + 15, y_pos_legend), font, 0.42, (200, 200, 200), thickness, cv2.LINE_AA)
             x_offset += 55
             
             # Overlap dot (Yellow) and text
             cv2.circle(banner, (x_offset + 5, y_pos_legend - 4), 4, (255, 255, 0), -1)
-            cv2.putText(banner, "Overlap", (x_offset + 15, y_pos_legend), font, 0.4, (200, 200, 200), thickness, cv2.LINE_AA)
+            cv2.putText(banner, "Overlap", (x_offset + 15, y_pos_legend), font, 0.42, (200, 200, 200), thickness, cv2.LINE_AA)
+            x_offset += 75
+
+            # Display exact Sample IoU score
+            iou_str = f"IoU: {sample_iou * 100:.2f}%"
+            cv2.putText(banner, iou_str, (x_offset, y_pos_legend), font, 0.46, (0, 255, 255), 1, cv2.LINE_AA)
 
             # 6. Combine banner and overlay
             final_img = np.vstack([banner, combined_overlay_np])
 
-            # 7. Save as a single image
+            # 7. Save image and companion text query file
+            file_prefix = f'sample_{batch_idx}_{i}'
             vis_img = Image.fromarray(final_img)
-            vis_img.save(os.path.join(vis_dir, f'{batch_idx}_{i}_combined.png'))
+            vis_img.save(os.path.join(vis_dir, f'{file_prefix}_combined.png'))
+
+            # Also save full text metadata file for easy copy-pasting into paper
+            with open(os.path.join(vis_dir, f'{file_prefix}_info.txt'), 'w', encoding='utf-8') as f_meta:
+                f_meta.write(f"Query Expression: {caption_str}\n")
+                f_meta.write(f"Sample IoU: {sample_iou * 100:.2f}%\n")
 
     print(f"  Saved visualizations to {vis_dir}")
 
