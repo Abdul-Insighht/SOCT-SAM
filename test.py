@@ -20,6 +20,7 @@ from torch.utils.data import DataLoader
 from args import get_args
 from data.dataset import get_dataset, collate_fn
 from lib.enhanced_model import Enhanced_RRSIS_UOT
+import utils
 
 
 def compute_metrics(pred_masks, gt_masks, threshold=0.5):
