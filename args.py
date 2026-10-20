@@ -151,6 +151,8 @@ def get_parser():
                         dest='visualize', help='Save visualization of predictions')
     parser.add_argument('--max_vis', type=int, default=50,
                         help='Maximum number of qualitative visualization samples to save (-1 for all)')
+    parser.add_argument('--val_freq', type=int, default=1,
+                        help='Validation frequency in epochs (default: 1, e.g. set 5 to validate every 5 epochs)')
 
     return parser
 

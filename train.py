@@ -515,60 +515,73 @@ def main():
             model, train_loader, optimizer, scheduler, scaler, device, epoch + 1, args
         )
 
-        # Validate
-        val_iou, val_overall_iou = validate(model, val_loader, device, epoch + 1, args)
-        
-        print('Average object IoU {}'.format(val_iou))
-        print('Overall IoU {}'.format(val_overall_iou))
+        # Validate according to val_freq or on the final epoch
+        val_freq = getattr(args, 'val_freq', 1)
+        run_val = ((epoch + 1) % val_freq == 0) or ((epoch + 1) == args.epochs)
 
-        # Wandb logging
-        if HAS_WANDB:
-            wandb.log({
-                'epoch': epoch + 1,
-                'train_loss': train_loss,
-                'train_iou': train_iou,
-                'val_iou': val_iou,
-                'val_overall_iou': val_overall_iou,
-                'lr': optimizer.param_groups[0]['lr'],
-            })
+        if run_val:
+            val_iou, val_overall_iou = validate(model, val_loader, device, epoch + 1, args)
+            print('Average object IoU {}'.format(val_iou))
+            print('Overall IoU {}'.format(val_overall_iou))
 
-        # Save best model
-        is_best = (val_iou + val_overall_iou) > best_iou
-        if is_best:
-            best_iou = val_iou + val_overall_iou
-            print('Better epoch: {}\n'.format(epoch))
-            save_path = os.path.join(args.output_dir, 'best_model.pth')
+            if HAS_WANDB:
+                wandb.log({
+                    'epoch': epoch + 1,
+                    'train_loss': train_loss,
+                    'train_iou': train_iou,
+                    'val_iou': val_iou,
+                    'val_overall_iou': val_overall_iou,
+                    'lr': optimizer.param_groups[0]['lr'],
+                })
+
+            # Save best model
+            is_best = (val_iou + val_overall_iou) > best_iou
+            if is_best:
+                best_iou = val_iou + val_overall_iou
+                print('Better epoch: {}\n'.format(epoch + 1))
+                save_path = os.path.join(args.output_dir, 'best_model.pth')
+                try:
+                    torch.save({
+                        'epoch': epoch + 1,
+                        'model_state_dict': model.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'best_iou': best_iou,
+                        'args': vars(args),
+                    }, save_path)
+                    print(f"  ★ New best model saved! (mIoU: {best_iou*100:.2f}%)")
+                except Exception as e:
+                    print(f"  ⚠️ [ERROR] Failed to save best_model.pth: {e}. Check available disk space!")
+        else:
+            print(f"  Skipping validation for epoch {epoch+1} (val_freq={val_freq}).")
+
+        # Save latest model at every epoch with safe exception handling
+        latest_save_path = os.path.join(args.output_dir, 'latest_model.pth')
+        try:
             torch.save({
                 'epoch': epoch + 1,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'best_iou': best_iou,
                 'args': vars(args),
-            }, save_path)
-            print(f"  ★ New best model saved!")
-
-        # Save latest model at every epoch
-        latest_save_path = os.path.join(args.output_dir, 'latest_model.pth')
-        torch.save({
-            'epoch': epoch + 1,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'best_iou': best_iou,
-            'args': vars(args),
-        }, latest_save_path)
-        print(f"  Latest model weights updated for epoch {epoch+1}.")
+            }, latest_save_path)
+            print(f"  Latest model weights updated for epoch {epoch+1}.")
+        except Exception as e:
+            print(f"  ⚠️ [ERROR] Failed to save latest_model.pth: {e}. Check available disk space!")
 
         # Save checkpoint every 10 epochs
         if (epoch + 1) % 10 == 0:
             save_path = os.path.join(args.output_dir, f'checkpoint_epoch{epoch+1}.pth')
-            torch.save({
-                'epoch': epoch + 1,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'best_iou': best_iou,
-                'args': vars(args),
-            }, save_path)
-            print(f"  Checkpoint saved: {save_path}")
+            try:
+                torch.save({
+                    'epoch': epoch + 1,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'best_iou': best_iou,
+                    'args': vars(args),
+                }, save_path)
+                print(f"  Checkpoint saved: {save_path}")
+            except Exception as e:
+                print(f"  ⚠️ [ERROR] Failed to save {save_path}: {e}")
 
     print(f"\n{'='*60}")
     print(f"  Training Complete!")
