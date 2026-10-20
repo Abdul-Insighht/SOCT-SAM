@@ -149,6 +149,8 @@ def get_parser():
                         help='Run evaluation only')
     parser.add_argument('--visualize', '--save_vis', action='store_true', default=False,
                         dest='visualize', help='Save visualization of predictions')
+    parser.add_argument('--max_vis', type=int, default=50,
+                        help='Maximum number of qualitative visualization samples to save (-1 for all)')
 
     return parser
 
