@@ -405,7 +405,13 @@ class REFER:
                         part_m = mask.decode(rle)
                         if part_m.ndim == 3:
                             part_m = np.sum(part_m, axis=2)
-                        m = np.maximum(m, (part_m > 0).astype(np.uint8))
+                        part_m = (part_m > 0).astype(np.uint8)
+                        if part_m.shape != (h, w):
+                            aligned = np.zeros((h, w), dtype=np.uint8)
+                            h_lim, w_lim = min(part_m.shape[0], h), min(part_m.shape[1], w)
+                            aligned[:h_lim, :w_lim] = part_m[:h_lim, :w_lim]
+                            part_m = aligned
+                        m = np.maximum(m, part_m)
                 elif isinstance(seg[0], dict):
                     # List of RLE dicts
                     m = np.zeros((h, w), dtype=np.uint8)
@@ -418,7 +424,13 @@ class REFER:
                         part_m = mask.decode(rle)
                         if part_m.ndim == 3:
                             part_m = np.sum(part_m, axis=2)
-                        m = np.maximum(m, (part_m > 0).astype(np.uint8))
+                        part_m = (part_m > 0).astype(np.uint8)
+                        if part_m.shape != (h, w):
+                            aligned = np.zeros((h, w), dtype=np.uint8)
+                            h_lim, w_lim = min(part_m.shape[0], h), min(part_m.shape[1], w)
+                            aligned[:h_lim, :w_lim] = part_m[:h_lim, :w_lim]
+                            part_m = aligned
+                        m = np.maximum(m, part_m)
                 else:
                     # Polygon format: [[x1, y1, x2, ...]] or [x1, y1, x2, ...]
                     if isinstance(seg[0], (int, float)):
@@ -444,6 +456,12 @@ class REFER:
         except Exception as e:
             print(f"[Warning] Failed to decode mask for ref_id {ref.get('ref_id', 'unknown')}: {e}")
             m = np.zeros((h, w), dtype=np.uint8)
+
+        if m.shape != (h, w):
+            aligned = np.zeros((h, w), dtype=np.uint8)
+            h_lim, w_lim = min(m.shape[0], h), min(m.shape[1], w)
+            aligned[:h_lim, :w_lim] = m[:h_lim, :w_lim]
+            m = aligned
 
         m = (m > 0).astype(np.uint8)
         area = float(m.sum())
