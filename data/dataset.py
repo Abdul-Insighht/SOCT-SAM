@@ -177,13 +177,13 @@ class RRSISDDataset(data.Dataset):
         return img, mask, caption
 
     @staticmethod
-    def _add_random_boxes(img, min_num=20, max_num=60, box_size=32):
+    def _add_random_boxes(img, min_num=2, max_num=6, box_size=16):
         img_np = np.asarray(img).copy()
-        img_size = img_np.shape[1]
+        img_h, img_w = img_np.shape[:2]
         num = random.randint(min_num, max_num)
         for _ in range(num):
-            y = random.randint(0, img_size - box_size)
-            x = random.randint(0, img_size - box_size)
+            y = random.randint(0, max(0, img_h - box_size))
+            x = random.randint(0, max(0, img_w - box_size))
             img_np[y:y+box_size, x:x+box_size] = 0
         return Image.fromarray(img_np, 'RGB')
 

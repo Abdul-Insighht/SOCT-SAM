@@ -37,6 +37,8 @@ def get_parser():
                         help='LoRA rank for vision backbone adaptation')
     parser.add_argument('--lora_alpha', type=float, default=32.0,
                         help='LoRA alpha scaling factor')
+    parser.add_argument('--lora_dropout', type=float, default=0.1,
+                        help='LoRA dropout rate to prevent overfitting on foundation model')
     parser.add_argument('--freeze_backbone', action='store_true', default=True,
                         help='Freeze SAM3 ViT backbone (train only LoRA + decoder)')
     parser.add_argument('--freeze_text_encoder', action='store_true', default=True,
@@ -115,6 +117,8 @@ def get_parser():
                         help='Weight decay')
     parser.add_argument('--warmup_epochs', type=int, default=0,
                         help='Number of warmup epochs')
+    parser.add_argument('--min_lr_ratio', type=float, default=0.15,
+                        help='Minimum LR floor ratio for cosine schedule to prevent late-epoch plateau/freezing')
     parser.add_argument('--grad_accum_steps', type=int, default=4,
                         help='Gradient accumulation steps (effective batch = batch_size * accum)')
 

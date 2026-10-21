@@ -41,11 +41,12 @@ class DynamicLoRALinear(nn.Module):
         alpha: LoRA scaling factor.
     """
 
-    def __init__(self, original_linear, text_dim=256, rank=16, alpha=32.0):
+    def __init__(self, original_linear, text_dim=256, rank=16, alpha=32.0, lora_dropout=0.1):
         super().__init__()
         self.original_linear = original_linear
         self.scaling = alpha / rank
         self.rank = rank
+        self.lora_dropout = nn.Dropout(p=lora_dropout) if lora_dropout > 0 else nn.Identity()
 
         # Freeze original weights
         for param in self.original_linear.parameters():
@@ -119,16 +120,19 @@ class DynamicLoRALinear(nn.Module):
             if x.dim() == 3:
                 # x: (B_w, N, D)
                 hidden = F.linear(x, self.lora_A) # (B_w, N, rank)
+                hidden = self.lora_dropout(hidden)
                 hidden = hidden * scale.unsqueeze(1) # Broadcast scale over sequence length N
                 delta = F.linear(hidden, self.lora_B) # (B_w, N, out_features)
             elif x.dim() == 2:
                 # x: (B_w, D)
                 hidden = F.linear(x, self.lora_A) # (B_w, rank)
+                hidden = self.lora_dropout(hidden)
                 hidden = hidden * scale # (B_w, rank)
                 delta = F.linear(hidden, self.lora_B) # (B_w, out_features)
             else:
                 # Fallback for other dimensions (e.g., 4D)
                 hidden = F.linear(x, self.lora_A)
+                hidden = self.lora_dropout(hidden)
                 # reshape scale to broadcast
                 scale_view = scale.view(scale.shape[0], *([1]*(x.dim()-2)), scale.shape[-1])
                 hidden = hidden * scale_view
@@ -138,6 +142,7 @@ class DynamicLoRALinear(nn.Module):
         else:
             # Fallback (no text) - acts as standard static LoRA
             hidden = F.linear(x, self.lora_A)
+            hidden = self.lora_dropout(hidden)
             delta = F.linear(hidden, self.lora_B)
             return base_out + self.scaling * delta
 
@@ -168,7 +173,7 @@ class DynamicLoRAManager:
             layer.clear_text_conditioning()
 
 
-def inject_dynamic_lora_adapters(model, text_dim=256, rank=16, alpha=32.0):
+def inject_dynamic_lora_adapters(model, text_dim=256, rank=16, alpha=32.0, lora_dropout=0.1):
     """
     Inject Dynamic LoRA adapters into SAM3's ViT backbone.
 
@@ -180,6 +185,7 @@ def inject_dynamic_lora_adapters(model, text_dim=256, rank=16, alpha=32.0):
         text_dim: Dimension of text features for conditioning.
         rank: LoRA rank.
         alpha: LoRA scaling factor.
+        lora_dropout: Dropout probability for regularizing LoRA bottleneck.
 
     Returns:
         Tuple of (num_params_added, DynamicLoRAManager).
@@ -200,7 +206,7 @@ def inject_dynamic_lora_adapters(model, text_dim=256, rank=16, alpha=32.0):
                             original = attn.qkv
                             attn.qkv = DynamicLoRALinear(
                                 original, text_dim=text_dim,
-                                rank=rank, alpha=alpha
+                                rank=rank, alpha=alpha, lora_dropout=lora_dropout
                             )
                             lora_params += sum(
                                 p.numel() for p in attn.qkv.parameters()
@@ -211,7 +217,7 @@ def inject_dynamic_lora_adapters(model, text_dim=256, rank=16, alpha=32.0):
                             original = attn.proj
                             attn.proj = DynamicLoRALinear(
                                 original, text_dim=text_dim,
-                                rank=rank, alpha=alpha
+                                rank=rank, alpha=alpha, lora_dropout=lora_dropout
                             )
                             lora_params += sum(
                                 p.numel() for p in attn.proj.parameters()
@@ -220,7 +226,7 @@ def inject_dynamic_lora_adapters(model, text_dim=256, rank=16, alpha=32.0):
 
     manager = DynamicLoRAManager(model)
 
-    print(f"[DynamicLoRA] Injected text-conditioned adapters (text_dim={text_dim}, rank={rank}, alpha={alpha})")
+    print(f"[DynamicLoRA] Injected text-conditioned adapters (text_dim={text_dim}, rank={rank}, alpha={alpha}, dropout={lora_dropout})")
     print(f"[DynamicLoRA] Added {lora_params:,} trainable dynamic LoRA parameters")
 
     return lora_params, manager

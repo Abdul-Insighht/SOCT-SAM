@@ -93,6 +93,7 @@ class Enhanced_RRSIS_UOT(nn.Module):
         image_size: int = 504,
         lora_rank: int = 16,
         lora_alpha: float = 32.0,
+        lora_dropout: float = 0.1,
         freeze_backbone: bool = True,
         freeze_text_encoder: bool = True,
         gradient_checkpointing: bool = True,
@@ -163,11 +164,11 @@ class Enhanced_RRSIS_UOT(nn.Module):
         if use_dynamic_lora:
             print("[Enhanced_RRSIS_UOT] Injecting Text-Guided Dynamic LoRA...")
             _, self.lora_manager = inject_dynamic_lora_adapters(
-                self.sam3, text_dim=d_model, rank=lora_rank, alpha=lora_alpha
+                self.sam3, text_dim=d_model, rank=lora_rank, alpha=lora_alpha, lora_dropout=lora_dropout
             )
         else:
             print("[Enhanced_RRSIS_UOT] Using standard static LoRA...")
-            inject_lora_adapters(self.sam3, rank=lora_rank, alpha=lora_alpha)
+            inject_lora_adapters(self.sam3, rank=lora_rank, alpha=lora_alpha, lora_dropout=lora_dropout)
             self.lora_manager = None
 
         # ====== Unfreeze trainable components ======

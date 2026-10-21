@@ -300,6 +300,7 @@ def main():
         image_size=args.image_size,
         lora_rank=args.lora_rank,
         lora_alpha=args.lora_alpha,
+        lora_dropout=getattr(args, 'lora_dropout', 0.1),
         freeze_backbone=args.freeze_backbone,
         freeze_text_encoder=args.freeze_text_encoder,
         gradient_checkpointing=args.gradient_checkpointing,
@@ -485,11 +486,17 @@ def main():
                 print(f"  [Warning] Could not load optimizer state (continuing with fresh optimizer): {e}")
 
         start_epoch = ckpt.get('epoch', 0)
-        best_iou = ckpt.get('best_iou', 0.0)
-        if best_iou > 2.0:
-            print(f"  [Auto-Fix] Legacy unnormalized best_iou detected ({best_iou:.4f}). Resetting to 0.0 for proper normalized tracking.")
-            best_iou = 0.0
-        print(f"  Resumed at epoch {start_epoch}, best_iou={best_iou:.4f}")
+        best_iou = ckpt.get('best_miou', None)
+        if best_iou is None:
+            best_iou = ckpt.get('best_iou', 0.0)
+            if best_iou > 100.0:
+                # Legacy combined (mIoU + oIoU ~ 150.0). Scale to mIoU estimate
+                print(f"  [Auto-Fix] Legacy combined best_iou detected ({best_iou:.2f}%). Converting to standard mIoU scale.")
+                best_iou = best_iou / 2.0
+            elif best_iou <= 1.0 and best_iou > 0.0:
+                # Fractional scale (e.g. 0.70 -> 70.0)
+                best_iou = best_iou * 100.0
+        print(f"  Resumed at epoch {start_epoch}, best_mIoU={best_iou:.2f}%")
         
         # Fast-forward the scheduler to the correct step
         if start_epoch > 0:
@@ -534,10 +541,10 @@ def main():
                     'lr': optimizer.param_groups[0]['lr'],
                 })
 
-            # Save best model
-            is_best = (val_iou + val_overall_iou) > best_iou
+            # Save best model based on mIoU (standard primary benchmark metric in RRSIS literature)
+            is_best = val_iou > best_iou
             if is_best:
-                best_iou = val_iou + val_overall_iou
+                best_iou = val_iou
                 print('Better epoch: {}\n'.format(epoch + 1))
                 save_path = os.path.join(args.output_dir, 'best_model.pth')
                 try:
@@ -546,9 +553,11 @@ def main():
                         'model_state_dict': model.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
                         'best_iou': best_iou,
+                        'best_miou': val_iou,
+                        'val_overall_iou': val_overall_iou,
                         'args': vars(args),
                     }, save_path)
-                    print(f"  ★ New best model saved! (mIoU: {best_iou*100:.2f}%)")
+                    print(f"  ★ New best model saved! (mIoU: {best_iou:.2f}%, oIoU: {val_overall_iou:.2f}%)")
                 except Exception as e:
                     print(f"  ⚠️ [ERROR] Failed to save best_model.pth: {e}. Check available disk space!")
         else:

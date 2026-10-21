@@ -20,11 +20,12 @@ class LoRALayer(nn.Module):
     where A ∈ R^{r×d_in}, B ∈ R^{d_out×r}, and r << min(d_in, d_out).
     """
 
-    def __init__(self, in_features, out_features, rank=16, alpha=32.0):
+    def __init__(self, in_features, out_features, rank=16, alpha=32.0, lora_dropout=0.1):
         super().__init__()
         self.rank = rank
         self.alpha = alpha
         self.scaling = alpha / rank
+        self.lora_dropout = nn.Dropout(p=lora_dropout) if lora_dropout > 0 else nn.Identity()
 
         # Low-rank decomposition matrices
         self.lora_A = nn.Parameter(torch.zeros(rank, in_features))
@@ -35,8 +36,9 @@ class LoRALayer(nn.Module):
         nn.init.zeros_(self.lora_B)
 
     def forward(self, x):
-        # ΔW @ x = B @ A @ x, scaled by α/r
-        return (x @ self.lora_A.T @ self.lora_B.T) * self.scaling
+        # ΔW @ x = B @ Dropout(A @ x), scaled by α/r
+        hidden = self.lora_dropout(x @ self.lora_A.T)
+        return (hidden @ self.lora_B.T) * self.scaling
 
 
 class LoRALinear(nn.Module):
@@ -45,7 +47,7 @@ class LoRALinear(nn.Module):
     The original linear is frozen; only LoRA params are trainable.
     """
 
-    def __init__(self, original_linear, rank=16, alpha=32.0):
+    def __init__(self, original_linear, rank=16, alpha=32.0, lora_dropout=0.1):
         super().__init__()
         self.original_linear = original_linear
         self.lora = LoRALayer(
@@ -53,6 +55,7 @@ class LoRALinear(nn.Module):
             out_features=original_linear.out_features,
             rank=rank,
             alpha=alpha,
+            lora_dropout=lora_dropout,
         )
         # Freeze original weights
         for param in self.original_linear.parameters():
@@ -93,7 +96,7 @@ class LoRAMultiheadAttention(nn.Module):
         )
 
 
-def inject_lora_adapters(model, rank=16, alpha=32.0, target_modules=None):
+def inject_lora_adapters(model, rank=16, alpha=32.0, lora_dropout=0.1, target_modules=None):
     """
     Inject LoRA adapters into a SAM3 model's ViT backbone.
 
@@ -104,6 +107,7 @@ def inject_lora_adapters(model, rank=16, alpha=32.0, target_modules=None):
         model: The SAM3 model (Sam3Image)
         rank: LoRA rank (default 16)
         alpha: LoRA alpha scaling factor
+        lora_dropout: Dropout probability
         target_modules: List of module name patterns to target (default: attention layers)
 
     Returns:
@@ -126,12 +130,12 @@ def inject_lora_adapters(model, rank=16, alpha=32.0, target_modules=None):
                         # LoRA on qkv projection
                         if hasattr(attn, 'qkv') and isinstance(attn.qkv, nn.Linear):
                             original = attn.qkv
-                            attn.qkv = LoRALinear(original, rank=rank, alpha=alpha)
+                            attn.qkv = LoRALinear(original, rank=rank, alpha=alpha, lora_dropout=lora_dropout)
                             lora_params += rank * original.in_features + original.out_features * rank
                         # LoRA on output projection
                         if hasattr(attn, 'proj') and isinstance(attn.proj, nn.Linear):
                             original = attn.proj
-                            attn.proj = LoRALinear(original, rank=rank, alpha=alpha)
+                            attn.proj = LoRALinear(original, rank=rank, alpha=alpha, lora_dropout=lora_dropout)
                             lora_params += rank * original.in_features + original.out_features * rank
 
     # Also inject LoRA into the transformer encoder's cross-attention
