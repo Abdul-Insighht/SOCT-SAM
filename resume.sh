@@ -18,6 +18,7 @@ DATA_ROOT=${2:-./data}
 SAM3_CKPT=${3:-./pre-trained-weights/sam3.pt}
 OUTPUT_DIR="./output/${DATASET}_enhanced_uot"
 RESUME_CKPT=${4:-"${OUTPUT_DIR}/latest_model.pth"}
+USER_IMG_SIZE=${5:-""}
 
 # Auto-detect checkpoint if default does not exist
 if [ ! -f "${RESUME_CKPT}" ] && [ ! -d "${RESUME_CKPT}" ]; then
@@ -29,15 +30,35 @@ if [ ! -f "${RESUME_CKPT}" ] && [ ! -d "${RESUME_CKPT}" ]; then
     done
 fi
 
+# Determine mathematically optimal patch-14 image size
+if [ -n "${USER_IMG_SIZE}" ]; then
+    IMG_SIZE=${USER_IMG_SIZE}
+elif [ "${DATASET}" == "rrsis_hr" ]; then
+    IMG_SIZE=784
+else
+    IMG_SIZE=504
+fi
+
+# Set safe batch size and gradient accumulation to prevent CUDA OOM
+if [ "${IMG_SIZE}" -gt 600 ]; then
+    BATCH_SIZE=2
+    GRAD_ACCUM=8
+else
+    BATCH_SIZE=4
+    GRAD_ACCUM=4
+fi
+
 # Highlight setup information
 echo "=============================================================================="
-echo "Resuming Enhanced_RRSIS_UOT training on GPU..."
-echo "Dataset:      ${DATASET}"
-echo "Data Root:    ${DATA_ROOT}"
-echo "SAM3 Ckpt:    ${SAM3_CKPT}"
-echo "Output Dir:   ${OUTPUT_DIR}"
-echo "Resume Ckpt:  ${RESUME_CKPT}"
-echo "Optimizations: Cosine LR Floor | Weight Decay 0.03 | Fine-tuning LR"
+echo "🔄 Resuming Enhanced_RRSIS_UOT training on GPU..."
+echo "📊 Dataset:         ${DATASET}"
+echo "📂 Data Root:       ${DATA_ROOT}"
+echo "💾 SAM3 Ckpt:       ${SAM3_CKPT}"
+echo "📁 Output Dir:      ${OUTPUT_DIR}"
+echo "💾 Resume Ckpt:     ${RESUME_CKPT}"
+echo "🖼️  Image Size:      ${IMG_SIZE} (divisible by patch size 14)"
+echo "📦 Batch / Accum:   ${BATCH_SIZE} x ${GRAD_ACCUM} (Effective BS = $((BATCH_SIZE * GRAD_ACCUM)))"
+echo "🔧 Optimizations:   Cosine LR Floor | LoRA Dropout 0.10 | IoU Query Matching"
 echo "=============================================================================="
 
 # Ensure the resume checkpoint exists
@@ -53,17 +74,17 @@ python train.py \
     --output_dir ${OUTPUT_DIR} \
     --sam3_ckpt ${SAM3_CKPT} \
     --resume ${RESUME_CKPT} \
-    --image_size 800 \
+    --image_size ${IMG_SIZE} \
     --lora_rank 16 \
     --lora_alpha 32.0 \
-    --epochs 50 \
-    --batch_size 4 \
-    --grad_accum_steps 4 \
+    --epochs 30 \
+    --batch_size ${BATCH_SIZE} \
+    --grad_accum_steps ${GRAD_ACCUM} \
     --lr 2e-5 \
     --lr_backbone 5e-6 \
     --lr_decoder 2e-5 \
     --weight_decay 0.03 \
-    --warmup_epochs 5 \
+    --warmup_epochs 2 \
     --fp16 \
     --gradient_checkpointing \
     --seed 42 \

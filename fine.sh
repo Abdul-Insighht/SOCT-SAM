@@ -18,16 +18,37 @@
 DATASET=${1:-rrsis_d}
 DATA_ROOT=${2:-./data}
 SAM3_CKPT=${3:-./pre-trained-weights/sam3.pt}
+USER_IMG_SIZE=${4:-""}
 OUTPUT_DIR="./output/${DATASET}_enhanced_uot"
+
+# Determine mathematically optimal patch-14 image size
+if [ -n "${USER_IMG_SIZE}" ]; then
+    IMG_SIZE=${USER_IMG_SIZE}
+elif [ "${DATASET}" == "rrsis_hr" ]; then
+    IMG_SIZE=784
+else
+    IMG_SIZE=504
+fi
+
+# Set safe batch size and gradient accumulation to prevent CUDA OOM
+if [ "${IMG_SIZE}" -gt 600 ]; then
+    BATCH_SIZE=2
+    GRAD_ACCUM=8
+else
+    BATCH_SIZE=4
+    GRAD_ACCUM=4
+fi
 
 # Highlight setup information
 echo "=============================================================================="
 echo "🚀 Starting Enhanced_RRSIS_UOT training on GPU..."
-echo "📊 Dataset:     ${DATASET}"
-echo "📂 Data Root:   ${DATA_ROOT}"
-echo "💾 SAM3 Ckpt:   ${SAM3_CKPT}"
-echo "📁 Output Dir:  ${OUTPUT_DIR}"
-echo "🔧 Optimizations: Dynamic LoRA | Contrastive Loss | Multi-Scale OT | OHEM Loss"
+echo "📊 Dataset:         ${DATASET}"
+echo "📂 Data Root:       ${DATA_ROOT}"
+echo "💾 SAM3 Ckpt:       ${SAM3_CKPT}"
+echo "📁 Output Dir:      ${OUTPUT_DIR}"
+echo "🖼️  Image Size:      ${IMG_SIZE} (divisible by patch size 14)"
+echo "📦 Batch / Accum:   ${BATCH_SIZE} x ${GRAD_ACCUM} (Effective BS = $((BATCH_SIZE * GRAD_ACCUM)))"
+echo "🔧 Optimizations:   Dynamic LoRA | Contrastive Loss | SOCT Aligner | OHEM Loss"
 echo "=============================================================================="
 
 # Ensure output directory exists
@@ -36,7 +57,6 @@ mkdir -p ${OUTPUT_DIR}
 # Ensure pre-trained weight exists or check parent dir fallback
 if [ ! -f "${SAM3_CKPT}" ]; then
     echo "⚠️  [WARNING] Pre-trained weight not found at '${SAM3_CKPT}'"
-    # Check parent dir fallback
     FALLBACK="../sam3_pre_trained_weights/sam3.pt"
     if [ -f "${FALLBACK}" ]; then
         echo "🔍 [INFO] Found fallback checkpoint in parent directory: '${FALLBACK}'"
@@ -46,23 +66,23 @@ if [ ! -f "${SAM3_CKPT}" ]; then
     fi
 fi
 
-# Run the training script with optimal hyperparameters for performance & speed from scratch
+# Run the training script with optimal hyperparameters
 python train.py \
     --dataset ${DATASET} \
     --data_root ${DATA_ROOT} \
     --output_dir ${OUTPUT_DIR} \
     --sam3_ckpt ${SAM3_CKPT} \
-    --image_size 800 \
+    --image_size ${IMG_SIZE} \
     --lora_rank 16 \
     --lora_alpha 32.0 \
-    --epochs 50 \
-    --batch_size 4 \
-    --grad_accum_steps 4\
+    --epochs 30 \
+    --batch_size ${BATCH_SIZE} \
+    --grad_accum_steps ${GRAD_ACCUM} \
     --lr 5e-5 \
     --lr_backbone 1e-5 \
     --lr_decoder 5e-5 \
     --weight_decay 0.03 \
-    --warmup_epochs 5 \
+    --warmup_epochs 2 \
     --fp16 \
     --gradient_checkpointing \
     --seed 42 \
