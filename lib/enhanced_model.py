@@ -486,7 +486,7 @@ class Enhanced_RRSIS_UOT(nn.Module):
             )
 
         # ====== Step 8: Select Best Mask ======
-        result = self._select_best_mask(out, B)
+        result = self._select_best_mask(out, B, masks_gt=masks_gt if self.training else None)
 
         # ====== Step 9: Clear Dynamic LoRA conditioning ======
         # if self.use_dynamic_lora and self.lora_manager is not None:
@@ -560,7 +560,7 @@ class Enhanced_RRSIS_UOT(nn.Module):
 
         return result
 
-    def _select_best_mask(self, out, batch_size):
+    def _select_best_mask(self, out, batch_size, masks_gt=None):
         """Select the best mask from SAM3's multi-query output."""
         result = {}
 
@@ -578,8 +578,30 @@ class Enhanced_RRSIS_UOT(nn.Module):
             result['all_query_masks'] = pred_masks  # (B, N, H_mask, W_mask)
 
             if pred_logits is not None:
-                scores = pred_logits.squeeze(-1)
-                best_idx = scores.argmax(dim=-1)
+                # During training with GT available: use IoU matching to select the winning query
+                # so the best query hypothesis receives mask gradients and the classifier
+                # learns to pick it. During eval/inference, use classifier argmax.
+                if self.training and masks_gt is not None:
+                    with torch.no_grad():
+                        gt_for_iou = masks_gt.float()
+                        if pred_masks.shape[-2:] != gt_for_iou.shape[-2:]:
+                            gt_for_iou = F.interpolate(gt_for_iou, size=pred_masks.shape[-2:], mode='nearest')
+                        gt_exp = gt_for_iou.squeeze(1).unsqueeze(1).expand_as(pred_masks)
+                        p_bin = (torch.sigmoid(pred_masks) > 0.5).float()
+                        inter = (p_bin * gt_exp).sum(dim=(2, 3))
+                        union = p_bin.sum(dim=(2, 3)) + gt_exp.sum(dim=(2, 3)) - inter
+                        query_ious = (inter + 1e-6) / (union + 1e-6)
+
+                        has_overlap = (inter > 0).any(dim=-1)
+                        best_iou_idx = query_ious.argmax(dim=-1)
+                        scores = pred_logits.squeeze(-1)
+                        best_score_idx = scores.argmax(dim=-1)
+
+                        best_idx = torch.where(has_overlap, best_iou_idx, best_score_idx)
+                else:
+                    scores = pred_logits.squeeze(-1)
+                    best_idx = scores.argmax(dim=-1)
+
                 batch_idx = torch.arange(batch_size, device=pred_masks.device)
                 best_masks = pred_masks[batch_idx, best_idx]
                 best_masks = best_masks.unsqueeze(1)
