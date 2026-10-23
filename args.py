@@ -13,6 +13,8 @@ def get_parser():
                         help='Path to SAM3 pretrained checkpoint')
     parser.add_argument('--resume', type=str, default='',
                         help='Path to resume training from checkpoint')
+    parser.add_argument('--finetune', action='store_true', default=False,
+                        help='Fine-tune mode: reset start_epoch to 0 and use fresh optimizer/scheduler for target resolution/epochs')
 
     # ====== Dataset ======
     parser.add_argument('--dataset', type=str, default='rrsis_d',

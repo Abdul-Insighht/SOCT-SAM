@@ -469,40 +469,46 @@ def main():
         ckpt = torch.load(resume_target, map_location='cpu', weights_only=False)
         model.load_state_dict(ckpt['model_state_dict'], strict=False)
         
-        # Optionally load optimizer state, but update hyperparams to match new args
-        if 'optimizer_state_dict' in ckpt:
-            try:
-                optimizer.load_state_dict(ckpt['optimizer_state_dict'])
-                for param_group in optimizer.param_groups:
-                    param_group['weight_decay'] = args.weight_decay
-                    if 'name' in param_group:
-                        if param_group['name'] == 'lora_adapters':
-                            param_group['lr'] = args.lr_backbone
-                        elif param_group['name'] in ['enhancements', 'decoder']:
-                            param_group['lr'] = args.lr_decoder
-                        else:
-                            param_group['lr'] = args.lr
-            except Exception as e:
-                print(f"  [Warning] Could not load optimizer state (continuing with fresh optimizer): {e}")
+        if getattr(args, 'finetune', False):
+            print(f"  [Fine-Tune Mode] Successfully loaded weights from {resume_target}.")
+            print(f"  Starting fresh fine-tune stage: 0 -> {args.epochs} epochs with fresh optimizer (lr={args.lr}).")
+            start_epoch = 0
+            best_iou = 0.0
+        else:
+            # Optionally load optimizer state, but update hyperparams to match new args
+            if 'optimizer_state_dict' in ckpt:
+                try:
+                    optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+                    for param_group in optimizer.param_groups:
+                        param_group['weight_decay'] = args.weight_decay
+                        if 'name' in param_group:
+                            if param_group['name'] == 'lora_adapters':
+                                param_group['lr'] = args.lr_backbone
+                            elif param_group['name'] in ['enhancements', 'decoder']:
+                                param_group['lr'] = args.lr_decoder
+                            else:
+                                param_group['lr'] = args.lr
+                except Exception as e:
+                    print(f"  [Warning] Could not load optimizer state (continuing with fresh optimizer): {e}")
 
-        start_epoch = ckpt.get('epoch', 0)
-        best_iou = ckpt.get('best_miou', None)
-        if best_iou is None:
-            best_iou = ckpt.get('best_iou', 0.0)
-            if best_iou > 100.0:
-                # Legacy combined (mIoU + oIoU ~ 150.0). Scale to mIoU estimate
-                print(f"  [Auto-Fix] Legacy combined best_iou detected ({best_iou:.2f}%). Converting to standard mIoU scale.")
-                best_iou = best_iou / 2.0
-            elif best_iou <= 1.0 and best_iou > 0.0:
-                # Fractional scale (e.g. 0.70 -> 70.0)
-                best_iou = best_iou * 100.0
-        print(f"  Resumed at epoch {start_epoch}, best_mIoU={best_iou:.2f}%")
-        
-        # Fast-forward the scheduler to the correct step
-        if start_epoch > 0:
-            print(f"  Catching up scheduler to epoch {start_epoch} (fast-forwarding {start_epoch * steps_per_epoch} steps)...")
-            for _ in range(start_epoch * steps_per_epoch):
-                scheduler.step()
+            start_epoch = ckpt.get('epoch', 0)
+            best_iou = ckpt.get('best_miou', None)
+            if best_iou is None:
+                best_iou = ckpt.get('best_iou', 0.0)
+                if best_iou > 100.0:
+                    # Legacy combined (mIoU + oIoU ~ 150.0). Scale to mIoU estimate
+                    print(f"  [Auto-Fix] Legacy combined best_iou detected ({best_iou:.2f}%). Converting to standard mIoU scale.")
+                    best_iou = best_iou / 2.0
+                elif best_iou <= 1.0 and best_iou > 0.0:
+                    # Fractional scale (e.g. 0.70 -> 70.0)
+                    best_iou = best_iou * 100.0
+            print(f"  Resumed at epoch {start_epoch}, best_mIoU={best_iou:.2f}%")
+            
+            # Fast-forward the scheduler to the correct step
+            if start_epoch > 0:
+                print(f"  Catching up scheduler to epoch {start_epoch} (fast-forwarding {start_epoch * steps_per_epoch} steps)...")
+                for _ in range(start_epoch * steps_per_epoch):
+                    scheduler.step()
 
     # ====== Wandb ======
     if HAS_WANDB:
