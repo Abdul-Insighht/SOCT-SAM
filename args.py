@@ -23,7 +23,7 @@ def get_parser():
                             'refsegrs', 'refseg-rs', 'refseg_rs'
                         ],
                         help='Dataset name: rrsis_d, rrsis_hr, ris-lad, refsegrs (hyphen & underscore aliases supported)')
-    parser.add_argument('--split', type=str, default='train',
+    parser.add_argument('--split', type=str, default='val',
                         help='Data split (train/val/test)')
     parser.add_argument('--splitBy', type=str, default='unc',
                         help='Split method')
