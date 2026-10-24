@@ -24,8 +24,8 @@ class SOCTSupervisionLoss(nn.Module):
     """
     def __init__(
         self,
-        lambda_occ: float = 1.0,
-        lambda_rho: float = 0.5,
+        lambda_occ: float = 0.3,
+        lambda_rho: float = 0.2,
         lambda_tau: float = 0.1,
         eps: float = 1e-6,
     ):
