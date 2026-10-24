@@ -73,9 +73,9 @@ def get_parser():
                         help='SOCT: Stochastic order penalty multiplier')
     parser.add_argument('--theta_anchor', type=float, default=0.1,
                         help='SOCT: Contextual anchor belief temperature')
-    parser.add_argument('--lambda_occ', type=float, default=1.0,
+    parser.add_argument('--lambda_occ', type=float, default=0.3,
                         help='SOCT: Weight for target occupancy loss (L_occ)')
-    parser.add_argument('--lambda_rho', type=float, default=0.5,
+    parser.add_argument('--lambda_rho', type=float, default=0.2,
                         help='SOCT: Weight for target area Huber loss (L_rho)')
     parser.add_argument('--lambda_tau', type=float, default=0.1,
                         help='SOCT: Weight for adaptive bandwidth regularization (L_tau)')

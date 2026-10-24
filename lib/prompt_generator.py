@@ -107,10 +107,15 @@ class GroundingAwarePromptGenerator(nn.Module):
             else:
                 area_ratio = (sample_q > 0.5).sum().float().item() / (H * W)
 
-            # Remote sensing targets are predominantly compact (< 5% area).
-            # Retain 1 focal centroid point for targets < 0.05 area to prevent background/neighbor noise.
-            # For larger structures, cap at 2 spatially separated points.
-            n_keep = 1 if area_ratio < 0.05 else min(2, sorted_coords.shape[0])
+            # Scale-aware prompting (Paper Sec 3.7):
+            # Retain 1 focal centroid point for truly tiny targets (area_ratio < 0.01) to prevent noise.
+            # For compact targets, use up to 3 points. For larger structures, use up to K_max=5 peaks.
+            if area_ratio < 0.01:
+                n_keep = 1
+            elif area_ratio < 0.05:
+                n_keep = min(3, sorted_coords.shape[0])
+            else:
+                n_keep = min(K_max, sorted_coords.shape[0])
 
             for k in range(n_keep):
                 y_c = sorted_coords[k, 0].float()
