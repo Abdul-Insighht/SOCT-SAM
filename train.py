@@ -255,7 +255,11 @@ def train_one_epoch(model, train_loader, optimizer, scheduler, scaler, device, e
             log_dict['area'] = outputs['area_loss'].item()
 
         metric_logger.update(**log_dict)
+        del outputs, loss
+        if (batch_idx + 1) % 200 == 0:
+            torch.cuda.empty_cache()
 
+    torch.cuda.empty_cache()
     return metric_logger.meters['loss'].global_avg, metric_logger.meters['iou'].global_avg
 
 
